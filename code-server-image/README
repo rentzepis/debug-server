@@ -1,0 +1,20 @@
+To build, run:
+
+chmod +x build.sh
+./build.sh
+
+`build.sh` uses BuildKit when possible, otherwise falls
+back on the classic builder. Failed builds automatically
+prune cache/images so disk does not keep growing.
+
+Manual build (no auto-cleanup on failure):
+
+docker build -t code-server-image .
+
+If you still run out of space:
+
+df -h
+docker system df
+./build.sh # failed builds prune cache automatically
+docker system prune -af
+docker builder prune -af

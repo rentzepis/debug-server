@@ -1,0 +1,7 @@
+To create an environment for a specified user, run:
+./create-codeserver.sh [USERNAME] [PORT]
+
+This (re)generates a hashed password for the user, required when they navigate to "http://[SERVER_IP]:[PORT]"
+
+In order to host the server and allow users to connect, run:
+./launch-test

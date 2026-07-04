@@ -1,0 +1,6 @@
+#!/bin/bash
+sudo -H -u test_student code-server \
+  --bind-addr 127.0.0.1:8080 \
+  --auth none \
+  --extensions-dir /opt/code-server/empty-extensions \
+  /scratch/test_student/
