@@ -146,7 +146,7 @@ router.post<
 
       await recordSessionEvent(req, {
         event: "login",
-        timestamp: Math.floor(Date.now() / 1000),
+        timestamp: new Date().toString(),
         sessionId,
         active: true,
       });
@@ -165,7 +165,7 @@ router.post<
         xForwardedFor: req.headers["x-forwarded-for"],
         remoteAddress: req.connection.remoteAddress,
         userAgent: req.headers["user-agent"],
-        timestamp: Math.floor(new Date().getTime() / 1000),
+        timestamp: new Date().toString(),
       }),
     );
 

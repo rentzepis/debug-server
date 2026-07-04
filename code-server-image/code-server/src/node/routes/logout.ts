@@ -18,7 +18,7 @@ router.get<{}, undefined, undefined, { base?: string; to?: string }>(
     if (sessionMonitor.enabled && sessionId) {
       await recordSessionEvent(req, {
         event: "logout",
-        timestamp: Math.floor(Date.now() / 1000),
+        timestamp: new Date().toString(),
         sessionId,
         active: false,
       });

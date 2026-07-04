@@ -9,7 +9,7 @@ import { authenticated, getCookieOptions, replaceTemplates } from "../http";
 
 export interface SessionEvent {
   event: string;
-  timestamp: number;
+  timestamp: string;
   sessionId?: string;
   visibility?: "visible" | "hidden";
   focused?: boolean;
@@ -22,7 +22,7 @@ export interface SessionEvent {
 
 interface SessionMonitoringRequestBody {
   event?: string;
-  timestamp?: number;
+  timestamp?: string;
   visibility?: "visible" | "hidden";
   focused?: boolean;
   active?: boolean;
@@ -133,7 +133,7 @@ class SessionMonitoringSink {
     const state = currentState();
     const payload = JSON.stringify({
       event,
-      timestamp: Math.floor(Date.now() / 1000),
+      timestamp: new Date().toString(),
       visibility: state.visibility,
       focused: state.focused,
       active: state.visibility === "visible" && state.focused,
@@ -255,7 +255,7 @@ router.post("/event", async (req, res) => {
 
   await sink.record(req, {
     event: body.event || "visibility",
-    timestamp: body.timestamp || Math.floor(Date.now() / 1000),
+    timestamp: body.timestamp || new Date().toString(),
     visibility: body.visibility,
     focused: typeof body.focused !== "undefined" ? body.focused : undefined,
     active: typeof body.active !== "undefined" ? body.active : undefined,
