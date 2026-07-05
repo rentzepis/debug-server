@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 
-############################################################################
-#  Proxylab testing framework
-#  Main program
-############################################################################
-
-# Driver for testing Proxy Lab
-
 import sys
 import os
 import socket

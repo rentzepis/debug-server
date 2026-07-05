@@ -1,8 +1,3 @@
-############################################################################
-#  Proxylab testing framework
-#  HTTP Servers and clients
-############################################################################
-
 import datetime
 import errno
 import random

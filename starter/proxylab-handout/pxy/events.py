@@ -1,9 +1,3 @@
-############################################################################
-#  Proxylab testing framework
-#  Event management
-############################################################################
-
-
 import sys
 import threading
 import datetime

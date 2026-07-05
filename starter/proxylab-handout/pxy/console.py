@@ -1,6 +1,3 @@
-# Implementation of simply command-line parser
-# New commands added by providing method which accepts argument list as its only argument
-
 import datetime
 import sys
 import threading

@@ -1,8 +1,3 @@
-############################################################################
-#  Proxylab testing framework
-#  Creating and using test files
-############################################################################
-
 import datetime
 import random
 import os

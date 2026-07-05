@@ -1,7 +1,5 @@
 #!/usr/bin/python3
 
-# Run complete set of tests on proxy
-
 import sys
 import os
 import signal
