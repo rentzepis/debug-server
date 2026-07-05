@@ -7,3 +7,4 @@ To create an environment for a specified user, run:
 This (re)generates a hashed password for the user, required when they navigate 
 to "http://[SERVER_IP]:[PORT]"
 
+Note that starter code is currently compiled for ARM machines.
