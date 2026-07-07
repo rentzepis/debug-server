@@ -30,9 +30,6 @@ def usage(name):
     print ("  -v VERBOSE   Print additional information")
     sys.exit(0)
 
-# Hidden options (research use only)
-#    print ("  -w WRAPLIB Specify wrapper .so file")
-
 # Global parameters
 # Set to home directory for program, split into tokens
 homePathFields = ['.']

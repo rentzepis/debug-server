@@ -35,6 +35,14 @@ chown -R 1000:1000 "$LOG_DIR"
 
 # copy starter files
 cp -r starter/proxylab/proxylab-handout/ "$HOME_DIR/"
+
+# If the user has a saved starter file, use it in place of the default proxy.c
+STUDENT_CODE="$SCRIPT_DIR/student-code/$USERNAME.c"
+if [[ -f "$STUDENT_CODE" ]]; then
+  echo "Loading starter code for $USERNAME from $STUDENT_CODE"
+  cp "$STUDENT_CODE" "$HOME_DIR/proxylab-handout/proxy.c"
+fi
+
 chown -R 1000:1000 "$HOME_DIR"
 
 docker run -d \
