@@ -82,8 +82,14 @@ main() {
 
   # Add the date, our name, links, enable telemetry (this just makes telemetry
   # available; telemetry can still be disabled by flag or setting), and
-  # configure trusted extensions (since some, like github.copilot-chat, never
-  # ask to be trusted and this is the only way to get auth working).
+  # configure trusted extensions.
+  #
+  # Chat/Copilot are intentionally left out of trustedExtensionAuthAccess: the
+  # Dockerfile patches chatEntitlementService.ts so Chat/Copilot are always
+  # reported as hidden (see the sed against CHAT_DISABLED_CONFIGURATION_KEY),
+  # so those extensions have no chat UI to attach to even if a user installs
+  # them from the marketplace, and there's no reason to auto-trust their auth
+  # access.
   #
   # This needs to be done before building as Code will read this file and embed
   # it into the client-side code.
@@ -119,8 +125,7 @@ main() {
     ],
     "trustedExtensionAuthAccess": [
       "vscode.git", "vscode.github",
-      "github.vscode-pull-request-github",
-      "github.copilot", "github.copilot-chat"
+      "github.vscode-pull-request-github"
     ],
     "aiConfig": {
       "ariaKey": "code-server"

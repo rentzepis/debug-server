@@ -132,6 +132,9 @@ RUN ln -s . code-server \
         sed -i "/const excludedExtensions = \[/,/\];/ s/];/\t'${name}',\n];/" "$EXT_EXCLUDE"; \
         rm -rf "$ext_dir"; \
       done \
+    && CHAT_ENTITLEMENT=lib/vscode/src/vs/workbench/services/chat/common/chatEntitlementService.ts \
+    && grep -q 'if (this._forceHidden || this.configurationService.getValue(ChatEntitlementContext.CHAT_DISABLED_CONFIGURATION_KEY) === true) {' "$CHAT_ENTITLEMENT" \
+    && sed -i "s@if (this\\._forceHidden || this\\.configurationService\\.getValue(ChatEntitlementContext\\.CHAT_DISABLED_CONFIGURATION_KEY) === true) {@if (true) { // code-server: chat/Copilot are always hidden and cannot be re-enabled via settings@" "$CHAT_ENTITLEMENT" \
     && test -s tsconfig.json \
     && jq 'del(.scripts["test-browser"], .scripts["playwright-install"], .devDependencies["@playwright/cli"], .devDependencies["@playwright/test"], .devDependencies["playwright-core"])' lib/vscode/package.json > lib/vscode/package.json.tmp \
     && mv lib/vscode/package.json.tmp lib/vscode/package.json \

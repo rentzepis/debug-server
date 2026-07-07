@@ -295,21 +295,17 @@ export function dispose() {
   socketProxyProvider.stop();
 }
 
-const injectScriptIntoHtml = (html: string, script: string): string => {
-  // The workbench is served with a strict CSP whose script-src has no
-  // 'unsafe-inline'; it only permits inline scripts carrying the page nonce
-  // (VS Code uses a fixed "1nline-m4p" nonce for its own bootstrap script).
-  // Without this nonce the injected monitoring script is blocked by CSP and
-  // never runs, so tab-switch/focus events are never reported. Reuse the
-  // page's nonce (falling back to the known VS Code constant) so it executes.
-  const nonceMatch = html.match(/<script[^>]*\snonce="([^"]+)"/i);
-  const nonce = nonceMatch ? nonceMatch[1] : "1nline-m4p";
-  const bootstrap = `<script nonce="${nonce}">${script}</script>`;
+const injectScriptIntoHtml = (html: string, scriptTag: string): string => {
+  // `scriptTag` is a complete <script src="…/session/monitor.js"></script>
+  // element. It is loaded as an EXTERNAL same-origin script, which the
+  // workbench CSP (script-src 'self') permits without any nonce/hash. Inline
+  // injection previously depended on VS Code's fixed nonce, which is brittle;
+  // an external same-origin script always runs under the same CSP.
   if (html.includes("</head>")) {
-    return html.replace("</head>", `${bootstrap}</head>`);
+    return html.replace("</head>", `${scriptTag}</head>`);
   }
   if (html.includes("</body>")) {
-    return html.replace("</body>", `${bootstrap}</body>`);
+    return html.replace("</body>", `${scriptTag}</body>`);
   }
   return html;
 };

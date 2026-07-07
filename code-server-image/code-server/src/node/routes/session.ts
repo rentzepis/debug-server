@@ -113,14 +113,31 @@ class SessionMonitoringSink {
     await this.writeQueue;
   }
 
+  public buildBrowserScriptTag(req: Request): string {
+    if (!this.enabled) {
+      return "";
+    }
+    // Load the monitor as an EXTERNAL same-origin script. The workbench CSP's
+    // script-src includes 'self', so an external same-origin <script src> is
+    // always allowed, whereas inline scripts require the page nonce/hash (which
+    // is brittle across VS Code versions). This guarantees the monitor runs.
+    const src = replaceTemplates(req, "{{BASE}}/session/monitor.js");
+    return `<script src="${src}"></script>`;
+  }
+
   public buildBrowserBootstrap(req: Request): string {
     if (!this.enabled) {
       return "";
     }
 
-    const endpoint = replaceTemplates(req, "{{BASE}}/session/event");
+    const fallbackEndpoint = replaceTemplates(req, "{{BASE}}/session/event");
     return `(() => {
-  const endpoint = ${JSON.stringify(endpoint)};
+  // Derive the event endpoint from this script's own URL so it stays correct
+  // regardless of any reverse-proxy base path (…/session/monitor.js -> …/session/event).
+  const self = document.currentScript && document.currentScript.src;
+  const endpoint = self
+    ? self.replace(/monitor\\.js(\\?.*)?$/, "event")
+    : new URL(${JSON.stringify(fallbackEndpoint)}, window.location.href).href;
   let lastVisibility;
   let lastFocused;
 
@@ -235,10 +252,21 @@ export const recordSessionEvent = async (
 };
 
 export const buildSessionMonitoringBootstrap = (req: Request): string => {
-  return getSessionMonitoringSink(req.args).buildBrowserBootstrap(req);
+  return getSessionMonitoringSink(req.args).buildBrowserScriptTag(req);
 };
 
 export const router = Router();
+
+router.get("/monitor.js", (req, res) => {
+  const sink = getSessionMonitoringSink(req.args);
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  if (!sink.enabled) {
+    res.status(204).end();
+    return;
+  }
+  res.end(sink.buildBrowserBootstrap(req));
+});
 
 router.post("/event", async (req, res) => {
   const sink = getSessionMonitoringSink(req.args);
