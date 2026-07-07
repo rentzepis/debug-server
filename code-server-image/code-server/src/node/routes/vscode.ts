@@ -296,7 +296,15 @@ export function dispose() {
 }
 
 const injectScriptIntoHtml = (html: string, script: string): string => {
-  const bootstrap = `<script>${script}</script>`;
+  // The workbench is served with a strict CSP whose script-src has no
+  // 'unsafe-inline'; it only permits inline scripts carrying the page nonce
+  // (VS Code uses a fixed "1nline-m4p" nonce for its own bootstrap script).
+  // Without this nonce the injected monitoring script is blocked by CSP and
+  // never runs, so tab-switch/focus events are never reported. Reuse the
+  // page's nonce (falling back to the known VS Code constant) so it executes.
+  const nonceMatch = html.match(/<script[^>]*\snonce="([^"]+)"/i);
+  const nonce = nonceMatch ? nonceMatch[1] : "1nline-m4p";
+  const bootstrap = `<script nonce="${nonce}">${script}</script>`;
   if (html.includes("</head>")) {
     return html.replace("</head>", `${bootstrap}</head>`);
   }

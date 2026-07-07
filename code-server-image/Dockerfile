@@ -11,8 +11,6 @@ RUN apt-get update \
     curl \
     git \
     jq \
-    vim \
-    valgrind \
     pkg-config \
     python-is-python3 \
     python3 \
@@ -183,9 +181,10 @@ RUN apt-get update \
     ca-certificates \
     clang-format \
     gdb \
-    git \
+    valgrind \
     make \
     python3 \
+    vim \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/*
 

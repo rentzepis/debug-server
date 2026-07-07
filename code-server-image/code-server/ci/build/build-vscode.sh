@@ -124,6 +124,10 @@ main() {
     ],
     "aiConfig": {
       "ariaKey": "code-server"
+    },
+    "configurationDefaults": {
+      "chat.disableAIFeatures": true,
+      "workbench.colorTheme": "Solarized Dark"
     }
   }
 EOF
