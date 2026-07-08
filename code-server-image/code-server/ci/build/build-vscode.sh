@@ -132,7 +132,7 @@ main() {
     },
     "configurationDefaults": {
       "chat.disableAIFeatures": true,
-      "workbench.colorTheme": "Solarized Dark"
+      "workbench.colorTheme": "Dark 2026"
     }
   }
 EOF

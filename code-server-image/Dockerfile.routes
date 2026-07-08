@@ -1,0 +1,19 @@
+# Fast rebuild: recompile code-server on top of existing image (skip VS Code rebuild).
+FROM code-server-image AS base
+
+FROM node:24-bookworm-slim AS compile
+WORKDIR /opt/code-server
+COPY --from=base /opt/code-server /opt/code-server
+COPY code-server/src/node/routes/session.ts ./src/node/routes/session.ts
+COPY code-server/src/node/routes/vscode.ts ./src/node/routes/vscode.ts
+COPY code-server/src/browser/pages/login.html ./src/browser/pages/login.html
+RUN sed -i 's/timestamp: Math.floor(Date.now() \/ 1000)/timestamp: new Date().toString()/g' \
+      src/node/routes/login.ts src/node/routes/logout.ts 2>/dev/null || true
+RUN npm install --ignore-scripts && npx tsc
+
+FROM code-server-image
+USER root
+COPY --from=compile /opt/code-server/out/node/routes/session.js /opt/code-server/out/node/routes/session.js
+COPY --from=compile /opt/code-server/out/node/routes/vscode.js /opt/code-server/out/node/routes/vscode.js
+COPY --from=compile /opt/code-server/src/browser/pages/login.html /opt/code-server/src/browser/pages/login.html
+USER coder

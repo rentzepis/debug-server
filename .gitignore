@@ -1,3 +1,7 @@
 logs/*
 gateway/users.json
 gateway/.session_secret
+student-code/*
+code-server-image/code-server/node_modules/*
+code-server-image/code-server/.cache/*
+code-server-image/code-server/out/*

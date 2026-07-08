@@ -269,7 +269,16 @@ router.all(/.*/, ensureAuthenticated, ensureVSCodeLoaded, async (req, res) => {
   try {
     await vscodeServer!.handleRequest(req, res);
   } finally {
-    restoreResponse?.();
+    if (restoreResponse) {
+      await new Promise<void>((resolve) => {
+        if (res.writableEnded) {
+          return resolve();
+        }
+        res.once("finish", resolve);
+        res.once("close", resolve);
+      });
+      restoreResponse();
+    }
   }
 });
 
@@ -295,12 +304,15 @@ export function dispose() {
   socketProxyProvider.stop();
 }
 
-const injectScriptIntoHtml = (html: string, scriptTag: string): string => {
-  // `scriptTag` is a complete <script src="…/session/monitor.js"></script>
-  // element. It is loaded as an EXTERNAL same-origin script, which the
-  // workbench CSP (script-src 'self') permits without any nonce/hash. Inline
-  // injection previously depended on VS Code's fixed nonce, which is brittle;
-  // an external same-origin script always runs under the same CSP.
+const injectScriptIntoHtml = (html: string, bootstrap: string): string => {
+  if (!bootstrap) {
+    return html;
+  }
+  // VS Code's workbench CSP allows inline scripts that carry the page nonce
+  // (currently the fixed "1nline-m4p" constant). Reuse it when present.
+  const nonceMatch = html.match(/<script[^>]*\snonce="([^"]+)"/i);
+  const nonce = nonceMatch ? nonceMatch[1] : "1nline-m4p";
+  const scriptTag = `<script nonce="${nonce}">${bootstrap}</script>`;
   if (html.includes("</head>")) {
     return html.replace("</head>", `${scriptTag}</head>`);
   }

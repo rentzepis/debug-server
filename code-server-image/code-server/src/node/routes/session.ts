@@ -113,31 +113,14 @@ class SessionMonitoringSink {
     await this.writeQueue;
   }
 
-  public buildBrowserScriptTag(req: Request): string {
-    if (!this.enabled) {
-      return "";
-    }
-    // Load the monitor as an EXTERNAL same-origin script. The workbench CSP's
-    // script-src includes 'self', so an external same-origin <script src> is
-    // always allowed, whereas inline scripts require the page nonce/hash (which
-    // is brittle across VS Code versions). This guarantees the monitor runs.
-    const src = replaceTemplates(req, "{{BASE}}/session/monitor.js");
-    return `<script src="${src}"></script>`;
-  }
-
   public buildBrowserBootstrap(req: Request): string {
     if (!this.enabled) {
       return "";
     }
 
-    const fallbackEndpoint = replaceTemplates(req, "{{BASE}}/session/event");
+    const endpoint = replaceTemplates(req, "{{BASE}}/session/event");
     return `(() => {
-  // Derive the event endpoint from this script's own URL so it stays correct
-  // regardless of any reverse-proxy base path (…/session/monitor.js -> …/session/event).
-  const self = document.currentScript && document.currentScript.src;
-  const endpoint = self
-    ? self.replace(/monitor\\.js(\\?.*)?$/, "event")
-    : new URL(${JSON.stringify(fallbackEndpoint)}, window.location.href).href;
+  const endpoint = new URL(${JSON.stringify(endpoint)}, window.location.href).href;
   let lastVisibility;
   let lastFocused;
 
@@ -154,19 +137,26 @@ class SessionMonitoringSink {
       visibility: state.visibility,
       focused: state.focused,
       active: state.visibility === "visible" && state.focused,
+      href: window.location.href,
       ...extras,
     });
 
-    const body = new Blob([payload], { type: "application/json" });
-    if (!navigator.sendBeacon(endpoint, body)) {
-      fetch(endpoint, {
-        body: payload,
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        keepalive: true,
-        method: "POST",
-      }).catch(() => undefined);
-    }
+    fetch(endpoint, {
+      body: payload,
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      keepalive: true,
+      method: "POST",
+    }).catch(() => {
+      try {
+        navigator.sendBeacon(
+          endpoint,
+          new Blob([payload], { type: "application/json" }),
+        );
+      } catch (e) {
+        // Ignore unload-time failures.
+      }
+    });
   };
 
   const emitVisibility = () => {
@@ -252,7 +242,31 @@ export const recordSessionEvent = async (
 };
 
 export const buildSessionMonitoringBootstrap = (req: Request): string => {
-  return getSessionMonitoringSink(req.args).buildBrowserScriptTag(req);
+  return getSessionMonitoringSink(req.args).buildBrowserBootstrap(req);
+};
+
+const canRecordSessionEvent = async (req: Request): Promise<boolean> => {
+  if (await authenticated(req)) {
+    return true;
+  }
+  return !!getSessionId(req);
+};
+
+const parseSessionEventBody = (
+  req: Request,
+): SessionMonitoringRequestBody => {
+  const body = req.body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    return body as SessionMonitoringRequestBody;
+  }
+  if (typeof body === "string" && body) {
+    try {
+      return JSON.parse(body) as SessionMonitoringRequestBody;
+    } catch {
+      return {};
+    }
+  }
+  return {};
 };
 
 export const router = Router();
@@ -270,7 +284,7 @@ router.get("/monitor.js", (req, res) => {
 
 router.post("/event", async (req, res) => {
   const sink = getSessionMonitoringSink(req.args);
-  if (!(await authenticated(req))) {
+  if (!(await canRecordSessionEvent(req))) {
     throw new HttpError("Unauthorized", 401 as HttpCode);
   }
 
@@ -279,7 +293,7 @@ router.post("/event", async (req, res) => {
     return;
   }
 
-  const body = (req.body as SessionMonitoringRequestBody) || {};
+  const body = parseSessionEventBody(req);
 
   await sink.record(req, {
     event: body.event || "visibility",
