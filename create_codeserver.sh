@@ -25,7 +25,7 @@ if [[ "$CLEAN" == "clean" ]]; then
   rm "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 else
   # keep the rest of the user's environment intact, only reset the code-server config/workspace
-  rm -rf "$HOME_DIR/.code-server"
+  rm -rf "$HOME_DIR/.local/share/code-server"
 fi
 
 mkdir -p "$LOG_DIR"
@@ -41,6 +41,14 @@ if [[ -f "$STUDENT_CODE" ]]; then
 else
   echo "Warning: no student code at $STUDENT_CODE, using starter proxy.c" >&2
 fi
+
+CODE_SERVER_USER_DIR="$HOME_DIR/.local/share/code-server/User"
+mkdir -p "$CODE_SERVER_USER_DIR"
+cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
+{
+  "workbench.colorTheme": "Dark 2026"
+}
+EOF
 
 chown -R 1000:1000 "$HOME_DIR"
 
