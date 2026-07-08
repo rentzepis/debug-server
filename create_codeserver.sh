@@ -13,6 +13,7 @@ fi
 PASSWORD=$(openssl rand -base64 16)
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOG_DIR="$SCRIPT_DIR/logs"
+USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 HOME_DIR="/home/$USERNAME"
 
 # reset user's container
@@ -52,6 +53,24 @@ EOF
 
 chown -R 1000:1000 "$HOME_DIR"
 
+mkdir -p "$(dirname "$USERS_FILE")"
+python3 - "$USERS_FILE" "$USERNAME" "$PORT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+users_file = Path(sys.argv[1])
+username = sys.argv[2]
+port = int(sys.argv[3])
+
+users = {}
+if users_file.exists() and users_file.stat().st_size > 0:
+    users = json.loads(users_file.read_text())
+
+users[username] = port
+users_file.write_text(json.dumps(users, indent=2) + "\n")
+PY
+
 docker run -d \
   --name "code-$USERNAME" \
   --memory=768m \
@@ -67,6 +86,9 @@ docker run -d \
   -p "$PORT":8080 \
   code-server-image
 
+LAN_IP=$(hostname -I | awk '{print $1}')
 echo "USERNAME: $USERNAME"
 echo "Port: $PORT"
 echo "Password: $PASSWORD"
+echo "Direct URL: http://${LAN_IP}:${PORT}/"
+echo "Gateway URL: http://${LAN_IP}/ (enter username on login screen)"

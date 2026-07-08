@@ -4,7 +4,7 @@ FROM node:24-bookworm-slim AS builder
 
 USER root
 
-RUN apt-get update \
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
  && apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=false \
     build-essential \
     ca-certificates \
@@ -150,6 +150,7 @@ RUN ln -s . code-server \
     && npm ci --prefix lib/vscode \
     && npm run build:vscode \
     && bash -c 'source ./ci/lib.sh && rsync -a "lib/vscode-reh-web-${VSCODE_TARGET}/" lib/vscode/' \
+    && test -f lib/vscode/out/server-main.js \
     && npm run build \
     && rm -rf \
         lib/vscode/src \
@@ -174,7 +175,7 @@ FROM node:24-bookworm-slim
 
 USER root
 
-RUN apt-get update \
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
  && apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=false \
     build-essential \
     ca-certificates \
@@ -182,6 +183,7 @@ RUN apt-get update \
     gdb \
     valgrind \
     python3 \
+    vim \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/*
 

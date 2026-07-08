@@ -15,13 +15,15 @@ cd code-server-image
 ./create_codeserver.sh <USERNAME> <PORT> [clean]
 ```
 
-This (re)creates a container for the user and prints a new password. Students open
-`http://<SERVER_IP>:<PORT>` and log in with that password.
+This (re)creates a container for the user and prints a new password. Students can open
+`http://<SERVER_IP>:<PORT>` and log in with that password, or use the gateway login
+screen at `http://<SERVER_IP>/` and enter their username to be redirected.
 
 - Assign a unique port per student (e.g. 9001–9099).
 - Without `clean`, only the code-server config is reset; the user's home directory is kept.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
+- `create_codeserver.sh` registers each username in `gateway/users.json` for gateway routing.
 
 Example:
 
@@ -30,6 +32,21 @@ Example:
 ./create_codeserver.sh bob   9002
 ./create_codeserver.sh alice 9001 clean   # full reset for alice
 ```
+
+## Gateway login
+
+Start the shared login screen on port 80 (or override with `GATEWAY_PORT`):
+
+```bash
+./start-gateway.sh
+```
+
+Students visit `http://<SERVER_IP>/`, enter their username, and are redirected to their
+assigned port. They still log in to code-server with the password printed by
+`create_codeserver.sh`.
+
+The gateway reads username-to-port mappings from `gateway/users.json`, which is updated
+automatically when you run `create_codeserver.sh`.
 
 ## LAN hosting
 
@@ -60,14 +77,18 @@ not Docker bridge IPs like `172.17.0.1`.
 
 After running `create_codeserver.sh`, share:
 
-- URL: `http://192.168.1.50:9001` (replace with your host IP and the student's port)
+- Gateway URL: `http://<SERVER_IP>/` (students enter their username, then log in)
+- Direct URL: `http://<SERVER_IP>:9001` (replace with your host IP and the student's port)
 - Password: printed by the script
+
+Start the gateway once per host with `./start-gateway.sh`.
 
 ### Firewall
 
 If `ufw` or a similar firewall is enabled, allow the student port range from the LAN only:
 
 ```bash
+sudo ufw allow 80/tcp
 sudo ufw allow from 192.168.0.0/16 to any port 9001:9099 proto tcp
 ```
 
