@@ -9,12 +9,13 @@ import { authenticated, getCookieOptions, replaceTemplates } from "../http";
 
 export interface SessionEvent {
   event: string;
-  timestamp: string;
+  timestamp?: string | number;
   sessionId?: string;
   visibility?: "visible" | "hidden";
   focused?: boolean;
   active?: boolean;
   href?: string;
+  reason?: string;
   userAgent?: string;
   xForwardedFor?: string | string[];
   remoteAddress?: string;
@@ -27,7 +28,98 @@ interface SessionMonitoringRequestBody {
   focused?: boolean;
   active?: boolean;
   href?: string;
+  reason?: string;
 }
+
+interface NormalizedSessionEvent {
+  event: string;
+  timestamp?: string | number;
+  sessionId?: string;
+  visibility?: "visible" | "hidden";
+  focused?: boolean;
+  active?: boolean;
+  reason?: string;
+  remoteAddress?: string;
+}
+
+const EVENT_LABELS: Record<string, string> = {
+  login: "LOGIN",
+  logout: "LOGOUT",
+  "window-focus": "FOCUS",
+  "window-blur": "BLUR",
+  "visibility-hidden": "TAB HIDDEN",
+  "visibility-visible": "TAB VISIBLE",
+  disconnect: "DISCONNECT",
+};
+
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+
+const formatLogTimestamp = (timestamp?: string | number): string => {
+  let date: Date;
+  if (typeof timestamp === "number") {
+    date = new Date(timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp);
+  } else if (typeof timestamp === "string" && timestamp) {
+    date = new Date(timestamp);
+  } else {
+    date = new Date();
+  }
+
+  if (Number.isNaN(date.getTime())) {
+    return String(timestamp ?? new Date().toISOString());
+  }
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+};
+
+const shortSessionId = (sessionId?: string): string => {
+  return sessionId ? sessionId.slice(0, 8) : "--------";
+};
+
+const describeEvent = (event: NormalizedSessionEvent): string => {
+  switch (event.event) {
+    case "login":
+      return "User signed in";
+    case "logout":
+      return "User signed out";
+    case "window-focus":
+      if (event.visibility === "hidden") {
+        return "Window focused while tab is hidden (background)";
+      }
+      return event.active
+        ? "Window focused — actively using the editor"
+        : "Window focused";
+    case "window-blur":
+      return event.visibility === "hidden"
+        ? "Window unfocused — tab already hidden"
+        : "Window unfocused — switched to another application";
+    case "visibility-hidden":
+      return event.focused
+        ? "Browser tab hidden — editor still has window focus"
+        : "Browser tab hidden — switched away or minimized";
+    case "visibility-visible":
+      return event.focused
+        ? "Browser tab visible — editor is active"
+        : "Browser tab visible — window not focused";
+    case "disconnect":
+      return event.reason === "pagehide"
+        ? "Session ending — page closing or navigating away"
+        : "Session ending — browser disconnected";
+    default:
+      return event.event.replace(/-/g, " ");
+  }
+};
+
+const formatSessionLogLine = (event: NormalizedSessionEvent): string => {
+  const label = (EVENT_LABELS[event.event] || event.event.toUpperCase()).padEnd(
+    12,
+    " ",
+  );
+  const session = shortSessionId(event.sessionId);
+  const summary = describeEvent(event);
+  const client = (event.remoteAddress || "?").replace(/^::ffff:/, "");
+
+  return `${formatLogTimestamp(event.timestamp)}  ${label}  [${session}]  ${summary}  (${client})`;
+};
 
 const monitoringEnabled = (): boolean => {
   const value = process.env.CODE_SERVER_SESSION_MONITORING;
@@ -54,20 +146,6 @@ const getSessionId = (req: Request): string | undefined => {
     : undefined;
 };
 
-const getRequestContext = (
-  req: Request,
-): Pick<
-  SessionEvent,
-  "userAgent" | "xForwardedFor" | "remoteAddress" | "href"
-> => {
-  return {
-    href: req.headers.referer || req.headers.origin,
-    userAgent: req.headers["user-agent"],
-    xForwardedFor: req.headers["x-forwarded-for"],
-    remoteAddress: req.connection.remoteAddress,
-  };
-};
-
 class SessionMonitoringSink {
   private writeQueue: Promise<void> = Promise.resolve();
 
@@ -89,16 +167,23 @@ class SessionMonitoringSink {
     return getCookieOptions(req);
   }
 
-  public async record(req: Request, event: SessionEvent): Promise<void> {
+  public record(req: Request, event: SessionEvent): void {
     if (!this.enabled) {
       return;
     }
 
-    const line = `${JSON.stringify({
-      schemaVersion: 1,
-      ...event,
-      sessionId: event.sessionId || getSessionId(req),
-      ...getRequestContext(req),
+    const sessionId = event.sessionId || getSessionId(req);
+    const remoteAddress =
+      event.remoteAddress || req.connection.remoteAddress || undefined;
+    const line = `${formatSessionLogLine({
+      event: event.event,
+      timestamp: event.timestamp,
+      sessionId,
+      visibility: event.visibility,
+      focused: event.focused,
+      active: event.active,
+      reason: event.reason,
+      remoteAddress,
     })}\n`;
 
     this.writeQueue = this.writeQueue
@@ -109,7 +194,9 @@ class SessionMonitoringSink {
       .catch((error) => {
         logger.error("Failed to write session monitoring event", error);
       });
+  }
 
+  public async flush(): Promise<void> {
     await this.writeQueue;
   }
 
@@ -120,7 +207,7 @@ class SessionMonitoringSink {
     // External same-origin script is allowed by script-src 'self' on all VS Code
     // builds. Inline injection requires a nonce/hash that varies by version.
     const src = replaceTemplates(req, "{{BASE}}/session/monitor.js");
-    return `<script src="${src}"></script>`;
+    return `<script defer src="${src}"></script>`;
   }
 
   public buildBrowserBootstrap(req: Request): string {
@@ -143,7 +230,7 @@ class SessionMonitoringSink {
     const state = currentState();
     const payload = JSON.stringify({
       event,
-      timestamp: new Date().toString(),
+      timestamp: new Date().toISOString(),
       visibility: state.visibility,
       focused: state.focused,
       active: state.visibility === "visible" && state.focused,
@@ -192,8 +279,17 @@ class SessionMonitoringSink {
   window.addEventListener("blur", emitFocus, { passive: true });
   window.addEventListener("pagehide", () => send("disconnect", { reason: "pagehide" }), { passive: true });
 
-  emitVisibility();
-  emitFocus();
+  const bootstrap = () => {
+    emitVisibility();
+    emitFocus();
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
+  } else if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(bootstrap);
+  } else {
+    setTimeout(bootstrap, 0);
+  }
 })();`;
   }
 }
@@ -248,7 +344,8 @@ export const recordSessionEvent = async (
   req: Request,
   event: SessionEvent,
 ): Promise<void> => {
-  await getSessionMonitoringSink(req.args).record(req, event);
+  getSessionMonitoringSink(req.args).record(req, event);
+  await getSessionMonitoringSink(req.args).flush();
 };
 
 export const buildSessionMonitoringBootstrap = (req: Request): string => {
@@ -284,7 +381,7 @@ export const router = Router();
 router.get("/monitor.js", (req, res) => {
   const sink = getSessionMonitoringSink(req.args);
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Cache-Control", "private, max-age=3600");
   if (!sink.enabled) {
     res.status(204).end();
     return;
@@ -305,13 +402,14 @@ router.post("/event", async (req, res) => {
 
   const body = parseSessionEventBody(req);
 
-  await sink.record(req, {
+  sink.record(req, {
     event: body.event || "visibility",
-    timestamp: body.timestamp || new Date().toString(),
+    timestamp: body.timestamp || new Date().toISOString(),
     visibility: body.visibility,
     focused: typeof body.focused !== "undefined" ? body.focused : undefined,
     active: typeof body.active !== "undefined" ? body.active : undefined,
     href: body.href || req.headers.referer || req.headers.origin,
+    reason: body.reason,
   });
 
   res.status(204).end();

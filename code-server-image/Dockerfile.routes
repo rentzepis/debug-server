@@ -6,6 +6,8 @@ WORKDIR /opt/code-server
 COPY --from=base /opt/code-server /opt/code-server
 COPY code-server/src/node/routes/session.ts ./src/node/routes/session.ts
 COPY code-server/src/node/routes/vscode.ts ./src/node/routes/vscode.ts
+COPY code-server/src/node/routes/login.ts ./src/node/routes/login.ts
+COPY code-server/src/node/routes/logout.ts ./src/node/routes/logout.ts
 COPY code-server/src/browser/pages/login.html ./src/browser/pages/login.html
 RUN sed -i 's/timestamp: Math.floor(Date.now() \/ 1000)/timestamp: new Date().toString()/g' \
       src/node/routes/login.ts src/node/routes/logout.ts 2>/dev/null || true
@@ -15,5 +17,7 @@ FROM code-server-image
 USER root
 COPY --from=compile /opt/code-server/out/node/routes/session.js /opt/code-server/out/node/routes/session.js
 COPY --from=compile /opt/code-server/out/node/routes/vscode.js /opt/code-server/out/node/routes/vscode.js
+COPY --from=compile /opt/code-server/out/node/routes/login.js /opt/code-server/out/node/routes/login.js
+COPY --from=compile /opt/code-server/out/node/routes/logout.js /opt/code-server/out/node/routes/logout.js
 COPY --from=compile /opt/code-server/src/browser/pages/login.html /opt/code-server/src/browser/pages/login.html
 USER coder

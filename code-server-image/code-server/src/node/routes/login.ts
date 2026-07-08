@@ -146,7 +146,7 @@ router.post<
 
       await recordSessionEvent(req, {
         event: "login",
-        timestamp: new Date().toString(),
+        timestamp: new Date().toISOString(),
         sessionId,
         active: true,
       });

@@ -260,9 +260,7 @@ router.post("/mint-key", async (req, res) => {
 router.all(/.*/, ensureAuthenticated, ensureVSCodeLoaded, async (req, res) => {
   const monitoringBootstrap = buildSessionMonitoringBootstrap(req);
   const restoreResponse =
-    monitoringBootstrap &&
-    req.method === "GET" &&
-    (req.headers.accept || "").includes("text/html")
+    monitoringBootstrap && shouldInjectMonitoringScript(req)
       ? interceptHtmlResponse(res, monitoringBootstrap)
       : undefined;
 
@@ -317,16 +315,32 @@ const injectScriptIntoHtml = (html: string, scriptTag: string): string => {
   return html;
 };
 
+/** Only patch the main workbench HTML; other HTML (extension host iframes, webviews) must stream through untouched. */
+const shouldInjectMonitoringScript = (req: express.Request): boolean => {
+  if (req.method !== "GET") {
+    return false;
+  }
+  if (!(req.headers.accept || "").includes("text/html")) {
+    return false;
+  }
+  const normalizedPath =
+    req.path.length > 1 && req.path.endsWith("/")
+      ? req.path.slice(0, -1)
+      : req.path;
+  return normalizedPath === "" || normalizedPath === "/";
+};
+
 const interceptHtmlResponse = (
   res: express.Response,
-  script: string,
+  scriptTag: string,
 ): (() => void) => {
   const originalSetHeader = res.setHeader.bind(res);
   const originalWriteHead = res.writeHead.bind(res);
   const originalWrite = res.write.bind(res);
   const originalEnd = res.end.bind(res);
-  const chunks: string[] = [];
   const decoder = new TextDecoder();
+  let injected = false;
+  let carry = "";
 
   const toChunk = (chunk: unknown): string => {
     if (typeof chunk === "string") {
@@ -336,6 +350,28 @@ const interceptHtmlResponse = (
       return decoder.decode(chunk);
     }
     return String(chunk);
+  };
+
+  const takeInjectedPrefix = (): string | undefined => {
+    if (injected) {
+      return undefined;
+    }
+    const headClose = carry.indexOf("</head>");
+    if (headClose !== -1) {
+      injected = true;
+      const prefix =
+        carry.slice(0, headClose) + scriptTag + carry.slice(headClose);
+      carry = "";
+      return prefix;
+    }
+    // Workbench HTML is small; bail out if we somehow never see </head>.
+    if (carry.length > 512 * 1024) {
+      injected = true;
+      const prefix = injectScriptIntoHtml(carry, scriptTag);
+      carry = "";
+      return prefix;
+    }
+    return undefined;
   };
 
   res.setHeader = ((
@@ -364,9 +400,27 @@ const interceptHtmlResponse = (
     encoding?: ((error?: Error | null) => void) | string,
     cb?: (error?: Error | null) => void,
   ) => {
-    if (chunk) {
-      chunks.push(toChunk(chunk));
+    if (injected) {
+      return originalWrite(
+        chunk as Parameters<typeof res.write>[0],
+        encoding as Parameters<typeof res.write>[1],
+        cb as Parameters<typeof res.write>[2],
+      );
     }
+
+    if (chunk) {
+      carry += toChunk(chunk);
+    }
+
+    const prefix = takeInjectedPrefix();
+    if (prefix !== undefined) {
+      originalWrite(prefix, "utf8");
+      if (carry) {
+        originalWrite(carry, "utf8");
+        carry = "";
+      }
+    }
+
     if (typeof encoding === "function") {
       encoding();
     }
@@ -381,13 +435,22 @@ const interceptHtmlResponse = (
     encoding?: (() => void) | string,
     cb?: () => void,
   ) => {
-    if (chunk) {
-      chunks.push(toChunk(chunk));
+    if (injected) {
+      return originalEnd(
+        chunk as Parameters<typeof res.end>[0],
+        encoding as Parameters<typeof res.end>[1],
+        cb as Parameters<typeof res.end>[2],
+      );
     }
 
-    const body = chunks.join("");
-    const injected = injectScriptIntoHtml(body, script);
-    return originalEnd.call(res, injected, "utf8", cb);
+    if (chunk) {
+      carry += toChunk(chunk);
+    }
+
+    injected = true;
+    const body = injectScriptIntoHtml(carry, scriptTag);
+    carry = "";
+    return originalEnd(body, "utf8", cb);
   }) as typeof res.end;
 
   return () => {
