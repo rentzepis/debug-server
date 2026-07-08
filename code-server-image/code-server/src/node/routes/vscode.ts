@@ -304,15 +304,10 @@ export function dispose() {
   socketProxyProvider.stop();
 }
 
-const injectScriptIntoHtml = (html: string, bootstrap: string): string => {
-  if (!bootstrap) {
+const injectScriptIntoHtml = (html: string, scriptTag: string): string => {
+  if (!scriptTag) {
     return html;
   }
-  // VS Code's workbench CSP allows inline scripts that carry the page nonce
-  // (currently the fixed "1nline-m4p" constant). Reuse it when present.
-  const nonceMatch = html.match(/<script[^>]*\snonce="([^"]+)"/i);
-  const nonce = nonceMatch ? nonceMatch[1] : "1nline-m4p";
-  const scriptTag = `<script nonce="${nonce}">${bootstrap}</script>`;
   if (html.includes("</head>")) {
     return html.replace("</head>", `${scriptTag}</head>`);
   }

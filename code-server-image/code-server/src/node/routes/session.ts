@@ -113,6 +113,16 @@ class SessionMonitoringSink {
     await this.writeQueue;
   }
 
+  public buildBrowserScriptTag(req: Request): string {
+    if (!this.enabled) {
+      return "";
+    }
+    // External same-origin script is allowed by script-src 'self' on all VS Code
+    // builds. Inline injection requires a nonce/hash that varies by version.
+    const src = replaceTemplates(req, "{{BASE}}/session/monitor.js");
+    return `<script src="${src}"></script>`;
+  }
+
   public buildBrowserBootstrap(req: Request): string {
     if (!this.enabled) {
       return "";
@@ -242,7 +252,7 @@ export const recordSessionEvent = async (
 };
 
 export const buildSessionMonitoringBootstrap = (req: Request): string => {
-  return getSessionMonitoringSink(req.args).buildBrowserBootstrap(req);
+  return getSessionMonitoringSink(req.args).buildBrowserScriptTag(req);
 };
 
 const canRecordSessionEvent = async (req: Request): Promise<boolean> => {
