@@ -59,7 +59,7 @@ ENV PYTHON=/usr/bin/python3 \
     PUPPETEER_SKIP_DOWNLOAD=1 \
     DISABLE_V8_COMPILE_CACHE=1 \
     SKIP_COPILOT=1 \
-    MINIFY=false \
+    MINIFY=true \
     GOMEMLIMIT=1600MiB \
     NODE_OPTIONS=--max-old-space-size=2048 \
     HOME=/home/coder \
@@ -145,10 +145,6 @@ RUN ln -s . code-server \
     && sed -i "s/return spawnTsgo(tsconfigPath, { taskName: 'typechecking extension (tsgo)', noEmit: true });/return Promise.resolve();/" lib/vscode/build/lib/extensions.ts \
     && sed -i "s/return createTsgoStream(tsconfigPath, { taskName: 'typechecking extension (tsgo)', noEmit: true });/return es.through();/" lib/vscode/build/lib/extensions.ts \
     && sed -i 's/return Promise.all(\[esbuildTask, \.\.\.typeCheckTasks\]).then(() => undefined);/return esbuildTask.then(() => undefined);/' lib/vscode/build/lib/extensions.ts \
-    && sed -i '/esbuild-vscode-min/d' lib/vscode/build/gulpfile.vscode.ts \
-    && sed -i '/esbuild-vscode-reh-min/d' lib/vscode/build/gulpfile.vscode.ts \
-    && sed -i "s/runEsbuildBundle('out-vscode-reh-web-min', true, true, 'server-web'/runEsbuildBundle('out-vscode-reh-web', false, true, 'server-web'/" lib/vscode/build/gulpfile.vscode.ts \
-    && sed -i 's/esbuild-vscode-reh-web-min/esbuild-vscode-reh-web/' lib/vscode/build/gulpfile.vscode.ts \
     && sed -i '/prepareCopilotRipgrepShimTaskREH(platform, arch, destinationFolderName)/d' lib/vscode/build/gulpfile.reh.ts \
     && SKIP_SUBMODULE_DEPS=1 npm install \
     && npm ci --prefix lib/vscode \
@@ -179,15 +175,13 @@ FROM node:24-bookworm-slim
 USER root
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+ && apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=false \
     build-essential \
     ca-certificates \
     clang-format \
     gdb \
     valgrind \
-    make \
     python3 \
-    vim \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/*
 

@@ -22,28 +22,39 @@ if [[ "$CLEAN" == "clean" ]]; then
   # full reset: wipe the user's entire environment and code
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"
+  rm "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 else
   # keep the rest of the user's environment intact, only reset the code-server config/workspace
   rm -rf "$HOME_DIR/.code-server"
-  rm -rf "$HOME_DIR/project"
 fi
 
-mkdir -p "$HOME_DIR/project"
 mkdir -p "$LOG_DIR"
 touch "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 chown -R 1000:1000 "$LOG_DIR"
 
 # copy starter files
 cp -r starter/proxylab/proxylab-handout/ "$HOME_DIR/"
+
+STUDENT_CODE="$SCRIPT_DIR/student-code/$USERNAME.c"
+if [[ -f "$STUDENT_CODE" ]]; then
+  cp "$STUDENT_CODE" "$HOME_DIR/proxy.c"
+else
+  echo "Warning: no student code at $STUDENT_CODE, using starter proxy.c" >&2
+fi
+
 chown -R 1000:1000 "$HOME_DIR"
 
 docker run -d \
   --name "code-$USERNAME" \
+  --memory=768m \
+  --memory-swap=768m \
+  --cpus=1.0 \
   --restart unless-stopped \
   -e PASSWORD="$PASSWORD" \
+  -e NODE_OPTIONS="--max-old-space-size=384" \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
-  -v "$HOME_DIR":/home/coder/ \
+  -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
   -p "$PORT":8080 \
   code-server-image
