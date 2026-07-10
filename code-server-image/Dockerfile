@@ -184,6 +184,7 @@ RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false upd
     ca-certificates \
     clang-format \
     gdb \
+    man-db \
     valgrind \
     python3 \
     vim \
