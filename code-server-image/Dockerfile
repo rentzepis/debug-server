@@ -151,7 +151,7 @@ RUN ln -s . code-server \
     && npm ci --prefix lib/vscode \
     && npm run build:vscode \
     && bash -c 'source ./ci/lib.sh && rsync -a "lib/vscode-reh-web-${VSCODE_TARGET}/" lib/vscode/' \
-    && jq 'del(.defaultChatAgent) | .builtInExtensionsEnabledWithAutoUpdates = [] | .configurationDefaults = ((.configurationDefaults // {}) + {"chat.disableAIFeatures": true, "workbench.secondarySideBar.defaultVisibility": "hidden", "workbench.colorTheme": "Dark 2026"})' lib/vscode/product.json > lib/vscode/product.json.tmp \
+    && jq 'del(.defaultChatAgent) | del(.extensionsGallery) | .builtInExtensionsEnabledWithAutoUpdates = [] | .configurationDefaults = ((.configurationDefaults // {}) + {"chat.disableAIFeatures": true, "workbench.secondarySideBar.defaultVisibility": "hidden", "workbench.colorTheme": "Dark 2026", "extensions.allowed": {"*": false, "debug-server.auto-terminal": true}})' lib/vscode/product.json > lib/vscode/product.json.tmp \
     && mv lib/vscode/product.json.tmp lib/vscode/product.json \
     && test -f lib/vscode/out/server-main.js \
     && npm run build \
@@ -194,6 +194,10 @@ RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false upd
 RUN if id node >/dev/null 2>&1; then userdel -r node; fi \
     && if getent group node >/dev/null 2>&1; then groupdel node; fi \
     && useradd --create-home --home-dir /home/coder --uid 1000 --shell /bin/bash coder
+
+# Block privilege escalation inside student containers.
+RUN rm -f /usr/bin/su /bin/su /usr/bin/sudo /bin/sudo /usr/bin/runuser \
+    && find /usr/bin /bin /usr/sbin /sbin -perm /6000 -type f -exec chmod u-s,g-s {} +
 
 COPY --from=builder /opt/code-server /opt/code-server
 

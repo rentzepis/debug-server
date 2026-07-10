@@ -38,10 +38,12 @@ Index: code-server/lib/vscode/src/vs/workbench/services/clipboard/browser/clipbo
  
  export class BrowserClipboardService extends BaseBrowserClipboardService {
  
-@@ -23,6 +24,7 @@ export class BrowserClipboardService extends BaseBrowserClipboardService {
+@@ -23,7 +24,8 @@ export class BrowserClipboardService extends BaseBrowserClipboardService {
+ 		@IOpenerService private readonly openerService: IOpenerService,
  		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
  		@ILogService logService: ILogService,
- 		@ILayoutService layoutService: ILayoutService,
+-		@ILayoutService layoutService: ILayoutService
++		@ILayoutService layoutService: ILayoutService,
 +		@IProductService private readonly productService: IProductService,
  	) {
  		super(layoutService, logService);

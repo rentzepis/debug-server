@@ -4,5 +4,9 @@
   "terminal.integrated.defaultLocation": "editor",
   "terminal.integrated.allowInUntrustedWorkspace": true,
   "chat.disableAIFeatures": true,
-  "workbench.secondarySideBar.defaultVisibility": "hidden"
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "extensions.allowed": {
+    "*": false,
+    "debug-server.auto-terminal": true
+  }
 }

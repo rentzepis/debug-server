@@ -64,7 +64,11 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
   "terminal.integrated.allowInUntrustedWorkspace": true,
   "security.workspace.trust.enabled": false,
   "chat.disableAIFeatures": true,
-  "workbench.secondarySideBar.defaultVisibility": "hidden"
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "extensions.allowed": {
+    "*": false,
+    "debug-server.auto-terminal": true
+  }
 }
 EOF
 cat > "$CODE_SERVER_USER_DIR/keybindings.json" <<'EOF'
@@ -109,6 +113,7 @@ docker run -d \
   --memory=768m \
   --memory-swap=768m \
   --cpus=1.0 \
+  --security-opt=no-new-privileges:true \
   --restart unless-stopped \
   -e PASSWORD="$PASSWORD" \
   -e CODE_SERVER_USERNAME="$USERNAME" \
