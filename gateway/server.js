@@ -51,7 +51,7 @@ function renderLoginPage({ error } = {}) {
       :root { color-scheme: light dark; }
       html, body { height: 100%; margin: 0; }
       body {
-        background: light-dark(rgb(244, 247, 252), #111827);
+        background: light-dark(rgb(244, 247, 252), #191a1b);
         color: light-dark(#111, #ddd);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
@@ -64,16 +64,13 @@ function renderLoginPage({ error } = {}) {
         padding: 20px;
       }
       .card-box {
-        background: light-dark(rgb(250, 253, 258), #1f2937);
+        background: light-dark(rgb(250, 253, 258), #2C2D2E);
         border-radius: 5px;
-        box-shadow: light-dark(rgba(60, 66, 87, 0.12), rgba(10, 10, 10, 0.62)) 0 7px 14px 0,
-          rgba(0, 0, 0, 0.12) 0 3px 6px 0;
         max-width: 520px;
         width: 100%;
       }
       .header {
-        border-bottom: 1px solid light-dark(#ddd, #111827);
-        padding: 30px;
+        padding: 40px 40px 20px 40px;
       }
       .header h1 {
         margin: 0;
@@ -84,7 +81,7 @@ function renderLoginPage({ error } = {}) {
         margin: 10px 0 0;
         color: light-dark(#555, #9ca3af);
       }
-      .content { padding: 40px; }
+      .content { padding: 20px 40px 40px 40px; }
       .login-form { display: flex; flex-direction: column; gap: 16px; }
       .field { display: flex; gap: 12px; }
       input[type="text"] {
@@ -92,7 +89,7 @@ function renderLoginPage({ error } = {}) {
         box-sizing: border-box;
         border: 1px solid light-dark(#ccc, #374151);
         border-radius: 5px;
-        background: light-dark(#fff, #111827);
+        background: light-dark(#fff, #191a1b);
         color: inherit;
         padding: 16px;
         font-size: 1rem;
