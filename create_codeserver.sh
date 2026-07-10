@@ -111,6 +111,7 @@ docker run -d \
   --cpus=1.0 \
   --restart unless-stopped \
   -e PASSWORD="$PASSWORD" \
+  -e CODE_SERVER_USERNAME="$USERNAME" \
   -e NODE_OPTIONS="--max-old-space-size=384" \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \

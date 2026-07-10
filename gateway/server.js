@@ -174,7 +174,7 @@ app.post("/login", (req, res) => {
   }
 
   const hostname = req.hostname;
-  const target = `${req.protocol}://${hostname}:${port}/?folder=/home/coder`;
+  const target = `${req.protocol}://${hostname}:${port}/?folder=/home/coder&user=${encodeURIComponent(username)}`;
   res.redirect(302, target);
 });
 

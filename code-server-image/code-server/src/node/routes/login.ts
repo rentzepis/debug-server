@@ -52,6 +52,20 @@ export class RateLimiter {
   }
 }
 
+const getUsername = (req: Request): string | undefined => {
+  const fromEnv = process.env.CODE_SERVER_USERNAME?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const fromQuery = req.query.user;
+  if (typeof fromQuery === "string" && fromQuery.trim()) {
+    return fromQuery.trim();
+  }
+
+  return undefined;
+};
+
 const getRoot = async (req: Request, error?: Error): Promise<string> => {
   const content = await fs.readFile(
     path.join(rootPath, "src/browser/pages/login.html"),
@@ -59,9 +73,12 @@ const getRoot = async (req: Request, error?: Error): Promise<string> => {
   );
   const locale = req.args["locale"] || "en";
   i18n.changeLanguage(locale);
+  const username = getUsername(req);
   const welcomeText =
     req.args["welcome-text"] ||
-    (i18n.t("WELCOME", { app: req.args["app-name"] }) as string);
+    (username
+      ? `Welcome, ${escapeHtml(username)}`
+      : (i18n.t("WELCOME", { app: req.args["app-name"] }) as string));
 
   // Determine password message using i18n
   let passwordMsg = i18n.t("LOGIN_PASSWORD");
