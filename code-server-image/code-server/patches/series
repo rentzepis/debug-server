@@ -4,7 +4,6 @@ proposed-api.diff
 marketplace.diff
 webview.diff
 disable-builtin-ext-update.diff
-insecure-notification.diff
 update-check.diff
 logout.diff
 store-socket.diff

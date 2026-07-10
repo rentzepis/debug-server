@@ -18,7 +18,12 @@ import {
   self,
 } from "../http";
 import { SocketProxyProvider } from "../socket";
-import { buildSessionMonitoringBootstrap } from "./session";
+import {
+  buildAgentSidebarHideBootstrap,
+  buildClipboardDisableBootstrap,
+  buildInsecureNotificationDismissBootstrap,
+  buildSessionMonitoringBootstrap,
+} from "./session";
 import { isFile } from "../util";
 import { type WebsocketRequest, Router as WsRouter } from "../wsRouter";
 
@@ -257,11 +262,20 @@ router.post("/mint-key", async (req, res) => {
   res.end(key);
 });
 
+const buildWorkbenchScriptInjection = (req: express.Request): string => {
+  return [
+    buildSessionMonitoringBootstrap(req),
+    buildClipboardDisableBootstrap(req),
+    buildInsecureNotificationDismissBootstrap(req),
+    buildAgentSidebarHideBootstrap(req),
+  ].join("");
+};
+
 router.all(/.*/, ensureAuthenticated, ensureVSCodeLoaded, async (req, res) => {
-  const monitoringBootstrap = buildSessionMonitoringBootstrap(req);
+  const workbenchScripts = buildWorkbenchScriptInjection(req);
   const restoreResponse =
-    monitoringBootstrap && shouldInjectMonitoringScript(req)
-      ? interceptHtmlResponse(res, monitoringBootstrap)
+    workbenchScripts && shouldInjectWorkbenchScripts(req)
+      ? interceptHtmlResponse(res, workbenchScripts)
       : undefined;
 
   try {
@@ -316,7 +330,7 @@ const injectScriptIntoHtml = (html: string, scriptTag: string): string => {
 };
 
 /** Only patch the main workbench HTML; other HTML (extension host iframes, webviews) must stream through untouched. */
-const shouldInjectMonitoringScript = (req: express.Request): boolean => {
+const shouldInjectWorkbenchScripts = (req: express.Request): boolean => {
   if (req.method !== "GET") {
     return false;
   }

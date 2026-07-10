@@ -1,0 +1,8 @@
+{
+  "task.allowAutomaticTasks": "on",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.defaultLocation": "editor",
+  "terminal.integrated.allowInUntrustedWorkspace": true,
+  "chat.disableAIFeatures": true,
+  "workbench.secondarySideBar.defaultVisibility": "hidden"
+}

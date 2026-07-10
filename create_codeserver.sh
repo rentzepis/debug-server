@@ -34,7 +34,7 @@ touch "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 chown -R 1000:1000 "$LOG_DIR"
 
 # copy starter files
-cp -r starter/proxylab/proxylab-handout/ "$HOME_DIR/"
+cp -r starter/proxylab-handout/ "$HOME_DIR/"
 
 STUDENT_CODE="$SCRIPT_DIR/student-code/$USERNAME.c"
 if [[ -f "$STUDENT_CODE" ]]; then
@@ -43,12 +43,45 @@ else
   echo "Warning: no student code at $STUDENT_CODE, using starter proxy.c" >&2
 fi
 
+mkdir -p "$HOME_DIR/.vscode"
+cp "$SCRIPT_DIR/tasks-master.json" "$HOME_DIR/.vscode/tasks.json"
+cp "$SCRIPT_DIR/vscode-settings-master.json" "$HOME_DIR/.vscode/settings.json"
+
 CODE_SERVER_USER_DIR="$HOME_DIR/.local/share/code-server/User"
 mkdir -p "$CODE_SERVER_USER_DIR"
+EXT_DIR="$HOME_DIR/.local/share/code-server/extensions/debug-server.auto-terminal-0.0.1"
+mkdir -p "$EXT_DIR"
+cp "$SCRIPT_DIR/extensions/auto-terminal/package.json" "$EXT_DIR/"
+cp "$SCRIPT_DIR/extensions/auto-terminal/extension.js" "$EXT_DIR/"
+
 cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
 {
-  "workbench.colorTheme": "Dark 2026"
+  "workbench.colorTheme": "Dark 2026",
+  "editor.selectionClipboard": false,
+  "task.allowAutomaticTasks": "on",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.defaultLocation": "editor",
+  "terminal.integrated.allowInUntrustedWorkspace": true,
+  "security.workspace.trust.enabled": false,
+  "chat.disableAIFeatures": true,
+  "workbench.secondarySideBar.defaultVisibility": "hidden"
 }
+EOF
+cat > "$CODE_SERVER_USER_DIR/keybindings.json" <<'EOF'
+[
+  { "key": "ctrl+c", "command": "-editor.action.clipboardCopyAction" },
+  { "key": "cmd+c", "command": "-editor.action.clipboardCopyAction" },
+  { "key": "ctrl+v", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "cmd+v", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "ctrl+x", "command": "-editor.action.clipboardCutAction" },
+  { "key": "cmd+x", "command": "-editor.action.clipboardCutAction" },
+  { "key": "ctrl+shift+c", "command": "-workbench.action.terminal.copySelection" },
+  { "key": "cmd+shift+c", "command": "-workbench.action.terminal.copySelection" },
+  { "key": "ctrl+shift+v", "command": "-workbench.action.terminal.paste" },
+  { "key": "cmd+shift+v", "command": "-workbench.action.terminal.paste" },
+  { "key": "shift+insert", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "ctrl+insert", "command": "-editor.action.clipboardCopyAction" }
+]
 EOF
 
 chown -R 1000:1000 "$HOME_DIR"
@@ -81,6 +114,8 @@ docker run -d \
   -e NODE_OPTIONS="--max-old-space-size=384" \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
+  -e CODE_SERVER_DISABLE_CLIPBOARD=1 \
+  -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
   -p "$PORT":8080 \

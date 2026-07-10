@@ -1,0 +1,19 @@
+{
+  "name": "auto-terminal",
+  "displayName": "Auto Terminal",
+  "description": "Opens a bash terminal when the workspace loads",
+  "version": "0.0.1",
+  "publisher": "debug-server",
+  "engines": {
+    "vscode": "^1.56.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  }
+}

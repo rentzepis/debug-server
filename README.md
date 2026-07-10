@@ -1,5 +1,77 @@
 # Debug Server
 
+## Features
+
+### Session monitoring
+
+Each student container records browser window and tab activity to a per-user log file on
+the host. This tracks when students sign in, focus or leave the editor, switch browser
+tabs, or close the page — not VS Code editor tab switches inside the IDE.
+
+Logs are written to `logs/<username>-session-monitoring.jsonl` and are enabled
+automatically by `create_codeserver.sh`. Tail a student's log in real time:
+
+```bash
+tail -f logs/alice-session-monitoring.jsonl
+```
+
+Example lines:
+
+```
+2026-07-08 17:33:22  LOGIN        [8ff0ae27]  User signed in  (172.17.0.1)
+2026-07-08 17:33:22  FOCUS        [8ff0ae27]  Window focused — actively using the editor  (172.17.0.1)
+2026-07-08 17:33:37  BLUR         [8ff0ae27]  Window unfocused — switched to another application  (172.17.0.1)
+2026-07-08 17:36:18  TAB HIDDEN   [8ff0ae27]  Browser tab hidden — switched away or minimized  (172.17.0.1)
+2026-07-08 17:37:46  TAB VISIBLE  [8ff0ae27]  Browser tab visible — editor is active  (172.17.0.1)
+2026-07-08 17:37:47  DISCONNECT   [8ff0ae27]  Session ending — page closing or navigating away  (172.17.0.1)
+2026-07-08 17:37:51  LOGOUT       [dcc46225]  User signed out  (172.17.0.1)
+```
+
+| Label | Meaning |
+|-------|---------|
+| `LOGIN` | Student authenticated to code-server |
+| `LOGOUT` | Student signed out |
+| `FOCUS` | Browser window gained focus |
+| `BLUR` | Browser window lost focus (another app focused) |
+| `TAB HIDDEN` | Student switched away from the code-server browser tab |
+| `TAB VISIBLE` | Student returned to the code-server browser tab |
+| `DISCONNECT` | Page closing or navigating away |
+
+To rebuild only the monitoring routes after code changes (without a full VS Code build):
+
+```bash
+cd code-server-image
+docker build -f Dockerfile.routes -t code-server-image .
+```
+
+Then recreate the student's container with `create_codeserver.sh`.
+
+### Clipboard restrictions
+
+Copy and paste are disabled in student containers by default. The restriction
+uses three layers:
+
+1. A browser script injected into the workbench that blocks clipboard events,
+   keyboard shortcuts, and `navigator.clipboard` access.
+2. VS Code keybinding overrides that unbind editor and terminal copy/paste
+   shortcuts.
+3. A VS Code clipboard-service patch (via `CODE_SERVER_DISABLE_CLIPBOARD=1`,
+   set automatically by `create_codeserver.sh`) that no-ops internal clipboard
+   read/write, including menu and command-palette actions.
+
+To disable clipboard restrictions for a container, omit or set
+`CODE_SERVER_DISABLE_CLIPBOARD=0` when running the container.
+
+**Rebuild notes:**
+
+- Route/script changes only: `docker build -f Dockerfile.routes -t code-server-image .`
+- Clipboard-service or VS Code patch changes: full `docker build -t code-server-image .` (or `./build.sh`)
+
+Recreate affected student containers after rebuilding.
+
+The insecure-context warning is suppressed automatically (via an injected dismiss script on
+current images, and by removing the upstream notification patch in future full builds).
+
 ## Setup
 
 To build the Docker image, run:
@@ -24,6 +96,11 @@ screen at `http://<SERVER_IP>/` and enter their username to be redirected.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
 - `create_codeserver.sh` registers each username in `gateway/users.json` for gateway routing.
+- Session monitoring is enabled by default; logs go to `logs/<username>-session-monitoring.jsonl`
+  (see [Session monitoring](#session-monitoring)).
+- A bash terminal opens automatically as an editor tab when the workspace loads. Re-running `create_codeserver.sh`
+  deploys the auto-terminal extension, `.vscode/tasks.json`, and settings needed for this behavior
+  (workspace trust is disabled so Restricted Mode does not block startup terminals).
 
 Example:
 

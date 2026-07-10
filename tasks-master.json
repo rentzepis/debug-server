@@ -4,7 +4,13 @@
         {
             "label": "Open Shell",
             "type": "shell",
-            "command": "bash",
+            "command": ":",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
             "runOptions": {
                 "runOn": "folderOpen"
             }

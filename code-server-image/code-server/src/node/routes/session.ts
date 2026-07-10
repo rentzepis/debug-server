@@ -126,6 +126,16 @@ const monitoringEnabled = (): boolean => {
   return value === "1" || value === "true" || value === "yes";
 };
 
+const clipboardDisabled = (): boolean => {
+  const value = process.env.CODE_SERVER_DISABLE_CLIPBOARD;
+  return value === "1" || value === "true" || value === "yes";
+};
+
+const agentSidebarHidden = (): boolean => {
+  const value = process.env.CODE_SERVER_HIDE_AGENT_SIDEBAR;
+  return value !== "0" && value !== "false" && value !== "no";
+};
+
 const monitoringPath = (args: DefaultedArgs): string => {
   return (
     process.env.CODE_SERVER_SESSION_MONITORING_FILE ||
@@ -352,6 +362,178 @@ export const buildSessionMonitoringBootstrap = (req: Request): string => {
   return getSessionMonitoringSink(req.args).buildBrowserScriptTag(req);
 };
 
+export const buildClipboardDisableBootstrap = (req: Request): string => {
+  if (!clipboardDisabled()) {
+    return "";
+  }
+  const src = replaceTemplates(req, "{{BASE}}/session/clipboard.js");
+  return `<script defer src="${src}"></script>`;
+};
+
+export const buildInsecureNotificationDismissBootstrap = (req: Request): string => {
+  const src = replaceTemplates(req, "{{BASE}}/session/dismiss-insecure.js");
+  return `<script defer src="${src}"></script>`;
+};
+
+export const buildAgentSidebarHideBootstrap = (req: Request): string => {
+  if (!agentSidebarHidden()) {
+    return "";
+  }
+  const src = replaceTemplates(req, "{{BASE}}/session/hide-agent-sidebar.js");
+  return `<script defer src="${src}"></script>`;
+};
+
+const buildDismissInsecureNotificationScript = (): string => {
+  return `(() => {
+  const pattern = /insecure context/i;
+  const dismiss = () => {
+    for (const el of document.querySelectorAll(
+      ".notification-list-item-message, .monaco-list-row"
+    )) {
+      const text = el.textContent || "";
+      if (!pattern.test(text)) {
+        continue;
+      }
+      const item = el.closest(".notification-list-item") || el.closest(".monaco-list-row");
+      if (!item) {
+        continue;
+      }
+      const understand = Array.from(item.querySelectorAll(".monaco-button")).find(
+        (button) => button.textContent?.trim() === "I understand",
+      );
+      if (understand) {
+        understand.click();
+        continue;
+      }
+      item.querySelector(".codicon-close")?.click();
+    }
+  };
+  const start = () => {
+    dismiss();
+    new MutationObserver(dismiss).observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+    setTimeout(dismiss, 1000);
+    setTimeout(dismiss, 3000);
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();`;
+};
+
+const buildAgentSidebarHideScript = (): string => {
+  return `(() => {
+  const style = document.createElement("style");
+  style.textContent = [
+    ".monaco-workbench .part.auxiliarybar { display: none !important; }",
+    ".monaco-workbench .titlebar-right .action-label[aria-label*='Agents'] { display: none !important; }",
+    ".monaco-workbench .titlebar-right .action-label[aria-label*='Chat'] { display: none !important; }",
+    ".monaco-workbench .activitybar .action-label[aria-label*='Chat'] { display: none !important; }",
+    ".monaco-workbench .activitybar .action-label[aria-label*='Copilot'] { display: none !important; }",
+  ].join("\\n");
+  document.head.appendChild(style);
+
+  const hideAgentSidebar = () => {
+    for (const el of document.querySelectorAll(
+      ".monaco-workbench .part.auxiliarybar, .monaco-workbench .auxiliarybar"
+    )) {
+      el.style.display = "none";
+    }
+    for (const el of document.querySelectorAll(
+      ".monaco-workbench .titlebar-right .action-label, .monaco-workbench .activitybar .action-label"
+    )) {
+      const label = (el.getAttribute("aria-label") || el.textContent || "").trim();
+      if (/\\b(chat|copilot|agents?)\\b/i.test(label)) {
+        el.style.display = "none";
+      }
+    }
+    for (const el of document.querySelectorAll(
+      ".monaco-workbench .pane-header, .monaco-workbench .composite.title"
+    )) {
+      const text = (el.textContent || "").trim();
+      if (/build with agents?/i.test(text)) {
+        const pane = el.closest(".part.auxiliarybar, .pane-composite-part");
+        if (pane) {
+          pane.style.display = "none";
+        }
+      }
+    }
+  };
+
+  const start = () => {
+    hideAgentSidebar();
+    new MutationObserver(hideAgentSidebar).observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "aria-label"],
+    });
+    setTimeout(hideAgentSidebar, 500);
+    setTimeout(hideAgentSidebar, 2000);
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+})();`;
+};
+
+const buildClipboardDisableScript = (): string => {
+  return `(() => {
+  const block = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return false;
+  };
+
+  ["copy", "cut", "paste"].forEach((type) => {
+    document.addEventListener(type, block, true);
+    window.addEventListener(type, block, true);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && (key === "c" || key === "v" || key === "x")) {
+      block(event);
+    }
+    if (event.shiftKey && key === "insert") {
+      block(event);
+    }
+    if (event.ctrlKey && key === "insert") {
+      block(event);
+    }
+  }, true);
+
+  const emptyClipboard = {
+    read: async () => [],
+    readText: async () => "",
+    write: async () => {},
+    writeText: async () => {},
+  };
+
+  if (navigator.clipboard) {
+    try {
+      Object.defineProperty(navigator, "clipboard", {
+        value: emptyClipboard,
+        configurable: false,
+      });
+    } catch (error) {
+      navigator.clipboard.readText = emptyClipboard.readText;
+      navigator.clipboard.writeText = emptyClipboard.writeText;
+      navigator.clipboard.read = emptyClipboard.read;
+      navigator.clipboard.write = emptyClipboard.write;
+    }
+  }
+})();`;
+};
+
 const canRecordSessionEvent = async (req: Request): Promise<boolean> => {
   if (await authenticated(req)) {
     return true;
@@ -387,6 +569,32 @@ router.get("/monitor.js", (req, res) => {
     return;
   }
   res.end(sink.buildBrowserBootstrap(req));
+});
+
+router.get("/clipboard.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (!clipboardDisabled()) {
+    res.status(204).end();
+    return;
+  }
+  res.end(buildClipboardDisableScript());
+});
+
+router.get("/dismiss-insecure.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.end(buildDismissInsecureNotificationScript());
+});
+
+router.get("/hide-agent-sidebar.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  if (!agentSidebarHidden()) {
+    res.status(204).end();
+    return;
+  }
+  res.end(buildAgentSidebarHideScript());
 });
 
 router.post("/event", async (req, res) => {
