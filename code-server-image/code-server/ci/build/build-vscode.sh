@@ -132,11 +132,12 @@ main() {
     },
     "configurationDefaults": {
       "chat.disableAIFeatures": true,
+      "workbench.secondarySideBar.defaultVisibility": "hidden",
       "workbench.colorTheme": "Dark 2026"
     }
   }
 EOF
-  ) > product.json
+  ) | jq 'del(.defaultChatAgent) | .builtInExtensionsEnabledWithAutoUpdates = []' > product.json
 
   if [[ ! ${SKIP_COPILOT-} ]]; then
     VSCODE_QUALITY=stable npm run gulp compile-copilot-extension-full-build

@@ -46,11 +46,12 @@ RUN rm -rf lib/vscode \
     && curl -fsSL "https://codeload.github.com/microsoft/vscode/tar.gz/${VSCODE_COMMIT}" \
     | tar -xz --strip-components=1 -C lib/vscode
 
-RUN curl -fsSL "https://raw.githubusercontent.com/coder/code-server/${CODE_SERVER_REF}/patches/series" \
-        -o patches/series \
+RUN set -eux \
     && while read -r patch; do \
-        curl -fsSL "https://raw.githubusercontent.com/coder/code-server/${CODE_SERVER_REF}/patches/${patch}" \
-            -o "patches/${patch}"; \
+        if [ ! -s "patches/${patch}" ]; then \
+            curl -fsSL "https://raw.githubusercontent.com/coder/code-server/${CODE_SERVER_REF}/patches/${patch}" \
+                -o "patches/${patch}"; \
+        fi; \
     done < patches/series
 
 ENV PYTHON=/usr/bin/python3 \
@@ -133,8 +134,8 @@ RUN ln -s . code-server \
         rm -rf "$ext_dir"; \
       done \
     && CHAT_ENTITLEMENT=lib/vscode/src/vs/workbench/services/chat/common/chatEntitlementService.ts \
-    && grep -q 'if (this._forceHidden || this.configurationService.getValue(ChatEntitlementContext.CHAT_DISABLED_CONFIGURATION_KEY) === true) {' "$CHAT_ENTITLEMENT" \
-    && sed -i "s@if (this\\._forceHidden || this\\.configurationService\\.getValue(ChatEntitlementContext\\.CHAT_DISABLED_CONFIGURATION_KEY) === true) {@if (true) { // code-server: chat/Copilot are always hidden and cannot be re-enabled via settings@" "$CHAT_ENTITLEMENT" \
+    && grep -q 'CHAT_DISABLED_CONFIGURATION_KEY) === true' "$CHAT_ENTITLEMENT" \
+    && sed -i 's/this\._forceHidden || this\.configurationService\.getValue(ChatEntitlementContext\.CHAT_DISABLED_CONFIGURATION_KEY) === true/true \/\* code-server: chat\/Copilot always hidden *\//' "$CHAT_ENTITLEMENT" \
     && test -s tsconfig.json \
     && jq 'del(.scripts["test-browser"], .scripts["playwright-install"], .devDependencies["@playwright/cli"], .devDependencies["@playwright/test"], .devDependencies["playwright-core"])' lib/vscode/package.json > lib/vscode/package.json.tmp \
     && mv lib/vscode/package.json.tmp lib/vscode/package.json \
@@ -150,6 +151,8 @@ RUN ln -s . code-server \
     && npm ci --prefix lib/vscode \
     && npm run build:vscode \
     && bash -c 'source ./ci/lib.sh && rsync -a "lib/vscode-reh-web-${VSCODE_TARGET}/" lib/vscode/' \
+    && jq 'del(.defaultChatAgent) | .builtInExtensionsEnabledWithAutoUpdates = [] | .configurationDefaults = ((.configurationDefaults // {}) + {"chat.disableAIFeatures": true, "workbench.secondarySideBar.defaultVisibility": "hidden", "workbench.colorTheme": "Dark 2026"})' lib/vscode/product.json > lib/vscode/product.json.tmp \
+    && mv lib/vscode/product.json.tmp lib/vscode/product.json \
     && test -f lib/vscode/out/server-main.js \
     && npm run build \
     && rm -rf \
