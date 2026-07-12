@@ -37,10 +37,20 @@ Example lines:
 | `TAB VISIBLE` | Student returned to the code-server browser tab |
 | `DISCONNECT` | Page closing or navigating away |
 
-To rebuild only the monitoring routes after code changes (without a full VS Code build):
+To rebuild only code-server sources after changes (without a full VS Code build):
 
 ```bash
 cd code-server-image
+./build.sh --fast
+```
+
+This recompiles everything under `code-server/src/` (routes, HTTP layer, login pages,
+service worker, i18n, etc.) on top of the existing image. It does **not** re-download
+or rebuild VS Code.
+
+Equivalent:
+
+```bash
 docker build -f Dockerfile.routes -t code-server-image .
 ```
 
@@ -64,8 +74,8 @@ To disable clipboard restrictions for a container, omit or set
 
 **Rebuild notes:**
 
-- Route/script changes only: `docker build -f Dockerfile.routes -t code-server-image .`
-- Clipboard-service or VS Code patch changes: full `docker build -t code-server-image .` (or `./build.sh`)
+- Code-server source changes (`code-server/src/**`): `./build.sh --fast`
+- Clipboard-service or VS Code patch changes: full `./build.sh`
 
 Recreate affected student containers after rebuilding.
 
@@ -79,6 +89,12 @@ To build the Docker image, run:
 ```bash
 cd code-server-image
 ./build.sh
+```
+
+For code-server-only changes (see [Session monitoring](#session-monitoring)), use the fast rebuild:
+
+```bash
+./build.sh --fast
 ```
 
 ## Create per-user environment

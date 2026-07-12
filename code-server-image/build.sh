@@ -3,6 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+FAST=0
+if [[ "${1:-}" == "--fast" ]]; then
+  FAST=1
+  shift
+fi
+
 IMAGE="${1:-code-server-image}"
 shift || true
 
@@ -30,7 +36,13 @@ else
   echo "Using classic docker build (buildx not available)."
 fi
 
-if docker build -t "${IMAGE}" "$@" .; then
+DOCKERFILE="Dockerfile"
+if [[ "${FAST}" -eq 1 ]]; then
+  DOCKERFILE="Dockerfile.routes"
+  echo "Fast rebuild: recompiling code-server sources only (no VS Code rebuild)."
+fi
+
+if docker build -f "${DOCKERFILE}" -t "${IMAGE}" "$@" .; then
   docker image prune -f >/dev/null 2>&1 || true
   echo "Build succeeded."
   exit 0

@@ -1,23 +1,33 @@
-# Fast rebuild: recompile code-server on top of existing image (skip VS Code rebuild).
+# Fast rebuild: recompile code-server sources on top of the existing image.
+# Skips the VS Code tarball download, patching, and build:vscode step.
+#
+# Local code-server/src/ may contain empty placeholder files; only non-empty
+# files are overlaid onto the base image's full source tree before tsc runs.
+#
+# Prerequisite: a full image must exist locally first:
+#   ./build.sh
+#
+# Usage:
+#   ./build.sh --fast
+#   docker build -f Dockerfile.routes -t code-server-image .
 FROM code-server-image AS base
 
 FROM node:24-bookworm-slim AS compile
 WORKDIR /opt/code-server
 COPY --from=base /opt/code-server /opt/code-server
-COPY code-server/src/node/routes/session.ts ./src/node/routes/session.ts
-COPY code-server/src/node/routes/vscode.ts ./src/node/routes/vscode.ts
-COPY code-server/src/node/routes/login.ts ./src/node/routes/login.ts
-COPY code-server/src/node/routes/logout.ts ./src/node/routes/logout.ts
-COPY code-server/src/browser/pages/login.html ./src/browser/pages/login.html
-RUN sed -i 's/timestamp: Math.floor(Date.now() \/ 1000)/timestamp: new Date().toString()/g' \
-      src/node/routes/login.ts src/node/routes/logout.ts 2>/dev/null || true
-RUN npm install --ignore-scripts && npx tsc
+COPY code-server/src/ ./src-overlay/
+RUN set -eux \
+    && find src-overlay -type f ! -empty -exec sh -c 'rel="${1#src-overlay/}"; install -D "$1" "src/$rel"' _ {} \; \
+    && rm -rf src-overlay \
+    && npm install --ignore-scripts \
+    && npx tsc \
+    && if ! grep -q -m1 "^#!/usr/bin/env node" out/node/entry.js; then \
+         sed -i.bak "1s;^;#!/usr/bin/env node\n;" out/node/entry.js && rm out/node/entry.js.bak; \
+         chmod +x out/node/entry.js; \
+       fi
 
 FROM code-server-image
 USER root
-COPY --from=compile /opt/code-server/out/node/routes/session.js /opt/code-server/out/node/routes/session.js
-COPY --from=compile /opt/code-server/out/node/routes/vscode.js /opt/code-server/out/node/routes/vscode.js
-COPY --from=compile /opt/code-server/out/node/routes/login.js /opt/code-server/out/node/routes/login.js
-COPY --from=compile /opt/code-server/out/node/routes/logout.js /opt/code-server/out/node/routes/logout.js
-COPY --from=compile /opt/code-server/src/browser/pages/login.html /opt/code-server/src/browser/pages/login.html
+COPY --from=compile /opt/code-server/out/ /opt/code-server/out/
+COPY --from=compile /opt/code-server/src/ /opt/code-server/src/
 USER coder
