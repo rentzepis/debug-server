@@ -113,6 +113,7 @@ The gateway refuses to start if Google credentials are missing.
 
 ```bash
 ./create_codeserver.sh <ANDREW_ID> [clean]
+./create_codeserver.sh --all [clean]
 ```
 
 Use the student's Andrew ID as the username (e.g. `jsmith` for `jsmith@andrew.cmu.edu`).
@@ -122,6 +123,8 @@ workspace only through the gateway on the Docker network.
 
 - Without `clean`, only the code-server config is reset; the user's home directory is kept.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
+- `--all` regenerates every Andrew ID currently listed in `gateway/users.json`
+  (optional `clean` applies to each).
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
 - Containers join `debug-server-net` so the gateway can proxy `https://<andrewid>.213-debug.com/`.
 - Session monitoring is enabled by default; logs go to `logs/<andrewid>-session-monitoring.jsonl`
@@ -136,6 +139,8 @@ Example:
 ./create_codeserver.sh jsmith
 ./create_codeserver.sh ada
 ./create_codeserver.sh jsmith clean   # full reset for jsmith
+./create_codeserver.sh --all          # regenerate all enrolled users (keep homes)
+./create_codeserver.sh --all clean    # wipe and recreate every enrolled user
 ```
 
 ## Gateway login (Google SSO)

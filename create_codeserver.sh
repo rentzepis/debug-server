@@ -1,13 +1,69 @@
 #!/bin/bash
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 
+usage() {
+  echo "Usage: $0 <andrew-id> [clean]" >&2
+  echo "       $0 --all [clean]" >&2
+  echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
+  echo "  --all recreates every enrolled user in gateway/users.json." >&2
+  exit 1
+}
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+USERS_FILE="$SCRIPT_DIR/gateway/users.json"
+
+# Recreate every enrolled Andrew ID from gateway/users.json
+if [[ "$1" == "--all" || "$1" == "-a" ]]; then
+  CLEAN_ALL="${2:-}"
+  if [[ -n "$CLEAN_ALL" && "$CLEAN_ALL" != "clean" ]]; then
+    usage
+  fi
+  if [[ ! -s "$USERS_FILE" ]]; then
+    echo "No enrolled users found in $USERS_FILE" >&2
+    exit 1
+  fi
+  mapfile -t ALL_USERS < <(python3 - "$USERS_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+users = json.loads(Path(sys.argv[1]).read_text() or "{}")
+for key, value in sorted(users.items(), key=lambda item: item[0].lower()):
+    if isinstance(value, bool):
+        if value:
+            print(key)
+    elif isinstance(value, (int, float)) or value:
+        print(key)
+PY
+)
+  if [[ ${#ALL_USERS[@]} -eq 0 ]]; then
+    echo "No enrolled users found in $USERS_FILE" >&2
+    exit 1
+  fi
+  echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE..."
+  failed=0
+  for andrew_id in "${ALL_USERS[@]}"; do
+    echo ""
+    echo "========== $andrew_id =========="
+    if ! "$0" "$andrew_id" ${CLEAN_ALL:+"$CLEAN_ALL"}; then
+      echo "FAILED: $andrew_id" >&2
+      failed=$((failed + 1))
+    fi
+  done
+  echo ""
+  if [[ "$failed" -gt 0 ]]; then
+    echo "Finished with $failed failure(s) out of ${#ALL_USERS[@]}." >&2
+    exit 1
+  fi
+  echo "Finished regenerating ${#ALL_USERS[@]} user(s)."
+  exit 0
+fi
+
 USERNAME=$1
 CLEAN=$2
 
 if [[ -z "$USERNAME" ]]; then
-  echo "Usage: $0 <andrew-id> [clean]" >&2
-  echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
-  exit 1
+  usage
 fi
 
 # Back-compat: old calls were <andrew-id> <port> [clean]
@@ -17,13 +73,10 @@ if [[ "$CLEAN" =~ ^[0-9]+$ ]]; then
 fi
 
 if [[ -n "$CLEAN" && "$CLEAN" != "clean" ]]; then
-  echo "Usage: $0 <andrew-id> [clean]" >&2
-  exit 1
+  usage
 fi
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOG_DIR="$SCRIPT_DIR/logs"
-USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
 NETWORK="debug-server-net"
 HOME_DIR="/home/$USERNAME"
