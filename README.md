@@ -85,6 +85,8 @@ This (re)creates a container for the user and prints a new password. Students ca
 screen at `http://<SERVER_IP>/` and enter their username to be redirected.
 
 - Assign a unique port per student (e.g. 9001–9099).
+- Reassigning a port to a different user frees the old container on that port, updates the
+  gateway mapping, and prints a new password for the new user.
 - Without `clean`, only the code-server config is reset; the user's home directory is kept.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.

@@ -16,17 +16,26 @@ LOG_DIR="$SCRIPT_DIR/logs"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 HOME_DIR="/home/$USERNAME"
 
-# reset user's container
-docker rm -f "code-$USERNAME" 2>/dev/null
+# reset this user's container
+docker rm -f "code-$USERNAME" 2>/dev/null || true
+
+# free the port if another container (e.g. a previous user) still owns it
+for cid in $(docker ps -aq --filter "publish=${PORT}" 2>/dev/null); do
+  cname=$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')
+  echo "Port $PORT is in use by $cname; removing it so $USERNAME can take over..."
+  docker rm -f "$cid" 2>/dev/null || true
+done
 
 if [[ "$CLEAN" == "clean" ]]; then
   # full reset: wipe the user's entire environment and code
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"
-  rm "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
+  rm -f "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 else
   # keep the rest of the user's environment intact, only reset the code-server config/workspace
   rm -rf "$HOME_DIR/.local/share/code-server"
+  # drop stale password so the new PASSWORD env is what code-server persists next
+  rm -f "$HOME_DIR/.config/code-server/config.yaml"
 fi
 
 mkdir -p "$LOG_DIR"
@@ -87,11 +96,13 @@ users = {}
 if users_file.exists() and users_file.stat().st_size > 0:
     users = json.loads(users_file.read_text())
 
+# drop anyone else previously mapped to this port, then claim it
+users = {u: p for u, p in users.items() if p != port and u != username}
 users[username] = port
 users_file.write_text(json.dumps(users, indent=2) + "\n")
 PY
 
-docker run -d \
+if ! docker run -d \
   --name "code-$USERNAME" \
   --memory=768m \
   --memory-swap=768m \
@@ -107,7 +118,10 @@ docker run -d \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
   -p "$PORT":8080 \
-  code-server-image
+  code-server-image; then
+  echo "Failed to start container for $USERNAME on port $PORT" >&2
+  exit 1
+fi
 
 LAN_IP=$(hostname -I | awk '{print $1}')
 echo "USERNAME: $USERNAME"
