@@ -2,12 +2,22 @@
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 
 USERNAME=$1
-PORT=$2
-CLEAN=$3
+CLEAN=$2
 
-if [[ -z "$USERNAME" || -z "$PORT" ]]; then
-  echo "Usage: $0 <andrew-id> <port> [clean]" >&2
+if [[ -z "$USERNAME" ]]; then
+  echo "Usage: $0 <andrew-id> [clean]" >&2
   echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
+  exit 1
+fi
+
+# Back-compat: old calls were <andrew-id> <port> [clean]
+if [[ "$CLEAN" =~ ^[0-9]+$ ]]; then
+  echo "Warning: port argument is no longer used; containers are reached only via the gateway." >&2
+  CLEAN=$3
+fi
+
+if [[ -n "$CLEAN" && "$CLEAN" != "clean" ]]; then
+  echo "Usage: $0 <andrew-id> [clean]" >&2
   exit 1
 fi
 
@@ -36,14 +46,8 @@ docker network create "$NETWORK" 2>/dev/null || true
 # reset this user's container
 docker rm -f "code-$USERNAME" 2>/dev/null || true
 
-# free the port if another container (e.g. a previous user) still owns it
-for cid in $(docker ps -aq --filter "publish=${PORT}" 2>/dev/null); do
-  cname=$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')
-  echo "Port $PORT is in use by $cname; removing it so $USERNAME can take over..."
-  docker rm -f "$cid" 2>/dev/null || true
-done
-
 if [[ "$CLEAN" == "clean" ]]; then
+
   # full reset: wipe the user's entire environment and code
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"
@@ -90,6 +94,11 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
   "security.workspace.trust.enabled": false,
   "chat.disableAIFeatures": true,
   "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "workbench.localHistory.enabled": false,
+  "files.exclude": {
+    "**/.local": true,
+    "**/.config": true
+  },
   "extensions.allowed": {
     "*": false,
     "debug-server.auto-terminal": true
@@ -108,23 +117,29 @@ EOF
 chown -R 1000:1000 "$HOME_DIR"
 
 mkdir -p "$(dirname "$USERS_FILE")"
-python3 - "$USERS_FILE" "$USERNAME" "$PORT" <<'PY'
+python3 - "$USERS_FILE" "$USERNAME" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 users_file = Path(sys.argv[1])
 username = sys.argv[2]
-port = int(sys.argv[3])
 
 users = {}
 if users_file.exists() and users_file.stat().st_size > 0:
     users = json.loads(users_file.read_text())
 
-# drop anyone else previously mapped to this port, then claim it
-users = {u: p for u, p in users.items() if p != port and u != username}
-users[username] = port
-users_file.write_text(json.dumps(users, indent=2) + "\n")
+# Normalize legacy username→port maps to an enrollment allowlist.
+normalized = {}
+for key, value in users.items():
+    if isinstance(value, bool):
+        if value:
+            normalized[key] = True
+    elif isinstance(value, (int, float)) or value:
+        normalized[key] = True
+
+normalized[username] = True
+users_file.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n")
 PY
 
 if ! docker run -d \
@@ -142,17 +157,16 @@ if ! docker run -d \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
-  -p "127.0.0.1:$PORT":8080 \
   code-server-image \
   node /opt/code-server/out/node/entry.js --bind-addr 0.0.0.0:8080 --auth none; then
-  echo "Failed to start container for $USERNAME on port $PORT" >&2
+  echo "Failed to start container for $USERNAME" >&2
   exit 1
 fi
 
 LAN_IP=$(hostname -I | awk '{print $1}')
 echo "USERNAME (Andrew ID): $USERNAME"
-echo "Port (localhost only): $PORT"
 echo "Auth: Google SSO via gateway (no password)"
+echo "Network: docker-only (no host port published)"
 echo "Gateway URL (LAN): http://${LAN_IP}/"
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   echo "Public gateway: https://${PUBLIC_BASE_DOMAIN}/"

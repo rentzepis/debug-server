@@ -5,6 +5,11 @@
   "terminal.integrated.allowInUntrustedWorkspace": true,
   "chat.disableAIFeatures": true,
   "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "workbench.localHistory.enabled": false,
+  "files.exclude": {
+    "**/.local": true,
+    "**/.config": true
+  },
   "extensions.allowed": {
     "*": false,
     "debug-server.auto-terminal": true

@@ -2,6 +2,14 @@
 ## for details.  tar does not understand /foo the same way git does; using it
 ## will cause "make submit" to malfunction.
 
+# Editor / user home junk (workspace root is $HOME in code-server)
+./.local
+./.local/*
+./.config
+./.config/*
+./.vscode
+./.vscode/*
+
 # Temporary files
 *~
 ._*
