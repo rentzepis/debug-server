@@ -20,7 +20,6 @@ import {
 import { SocketProxyProvider } from "../socket";
 import {
   buildAgentSidebarHideBootstrap,
-  buildClipboardDisableBootstrap,
   buildInsecureNotificationDismissBootstrap,
   buildSessionMonitoringBootstrap,
 } from "./session";
@@ -265,7 +264,6 @@ router.post("/mint-key", async (req, res) => {
 const buildWorkbenchScriptInjection = (req: express.Request): string => {
   return [
     buildSessionMonitoringBootstrap(req),
-    buildClipboardDisableBootstrap(req),
     buildInsecureNotificationDismissBootstrap(req),
     buildAgentSidebarHideBootstrap(req),
   ].join("");

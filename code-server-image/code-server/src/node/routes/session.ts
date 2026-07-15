@@ -126,11 +126,6 @@ const monitoringEnabled = (): boolean => {
   return value === "1" || value === "true" || value === "yes";
 };
 
-const clipboardDisabled = (): boolean => {
-  const value = process.env.CODE_SERVER_DISABLE_CLIPBOARD;
-  return value === "1" || value === "true" || value === "yes";
-};
-
 const agentSidebarHidden = (): boolean => {
   const value = process.env.CODE_SERVER_HIDE_AGENT_SIDEBAR;
   return value !== "0" && value !== "false" && value !== "no";
@@ -362,14 +357,6 @@ export const buildSessionMonitoringBootstrap = (req: Request): string => {
   return getSessionMonitoringSink(req.args).buildBrowserScriptTag(req);
 };
 
-export const buildClipboardDisableBootstrap = (req: Request): string => {
-  if (!clipboardDisabled()) {
-    return "";
-  }
-  const src = replaceTemplates(req, "{{BASE}}/session/clipboard.js");
-  return `<script defer src="${src}"></script>`;
-};
-
 export const buildInsecureNotificationDismissBootstrap = (req: Request): string => {
   const src = replaceTemplates(req, "{{BASE}}/session/dismiss-insecure.js");
   return `<script defer src="${src}"></script>`;
@@ -484,56 +471,6 @@ const buildAgentSidebarHideScript = (): string => {
 })();`;
 };
 
-const buildClipboardDisableScript = (): string => {
-  return `(() => {
-  const block = (event) => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    return false;
-  };
-
-  ["copy", "cut", "paste"].forEach((type) => {
-    document.addEventListener(type, block, true);
-    window.addEventListener(type, block, true);
-  });
-
-  document.addEventListener("keydown", (event) => {
-    const key = event.key.toLowerCase();
-    const mod = event.ctrlKey || event.metaKey;
-    if (mod && (key === "c" || key === "v" || key === "x")) {
-      block(event);
-    }
-    if (event.shiftKey && key === "insert") {
-      block(event);
-    }
-    if (event.ctrlKey && key === "insert") {
-      block(event);
-    }
-  }, true);
-
-  const emptyClipboard = {
-    read: async () => [],
-    readText: async () => "",
-    write: async () => {},
-    writeText: async () => {},
-  };
-
-  if (navigator.clipboard) {
-    try {
-      Object.defineProperty(navigator, "clipboard", {
-        value: emptyClipboard,
-        configurable: false,
-      });
-    } catch (error) {
-      navigator.clipboard.readText = emptyClipboard.readText;
-      navigator.clipboard.writeText = emptyClipboard.writeText;
-      navigator.clipboard.read = emptyClipboard.read;
-      navigator.clipboard.write = emptyClipboard.write;
-    }
-  }
-})();`;
-};
-
 const canRecordSessionEvent = async (req: Request): Promise<boolean> => {
   if (await authenticated(req)) {
     return true;
@@ -569,16 +506,6 @@ router.get("/monitor.js", (req, res) => {
     return;
   }
   res.end(sink.buildBrowserBootstrap(req));
-});
-
-router.get("/clipboard.js", (req, res) => {
-  res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-  res.setHeader("Cache-Control", "private, max-age=3600");
-  if (!clipboardDisabled()) {
-    res.status(204).end();
-    return;
-  }
-  res.end(buildClipboardDisableScript());
 });
 
 router.get("/dismiss-insecure.js", (req, res) => {
