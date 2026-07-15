@@ -7,8 +7,16 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 NETWORK="debug-server-net"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 SECRET_FILE="$SCRIPT_DIR/gateway/.session_secret"
+DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
 IMAGE="gateway-image"
 GATEWAY_PORT="${GATEWAY_PORT:-80}"
+
+# Prefer env, then gateway/domain file
+PUBLIC_BASE_DOMAIN="${PUBLIC_BASE_DOMAIN:-}"
+if [[ -z "$PUBLIC_BASE_DOMAIN" && -f "$DOMAIN_FILE" ]]; then
+  PUBLIC_BASE_DOMAIN=$(tr -d '[:space:]' < "$DOMAIN_FILE")
+fi
+PUBLIC_BASE_DOMAIN=$(echo "$PUBLIC_BASE_DOMAIN" | tr '[:upper:]' '[:lower:]')
 
 docker network create "$NETWORK" 2>/dev/null || true
 
@@ -27,22 +35,29 @@ docker build -t "${IMAGE}" "$SCRIPT_DIR/gateway"
 
 docker rm -f gateway 2>/dev/null || true
 
+DOCKER_ENV=(
+  -e SESSION_SECRET="$SESSION_SECRET"
+  -e USERS_FILE=/data/users.json
+)
+if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
+  DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
+fi
+
 docker run -d \
   --name gateway \
   --restart unless-stopped \
   --network "$NETWORK" \
   -p "${GATEWAY_PORT}:8080" \
-  -e SESSION_SECRET="$SESSION_SECRET" \
-  -e USERS_FILE=/data/users.json \
+  "${DOCKER_ENV[@]}" \
   -v "$USERS_FILE:/data/users.json" \
   "${IMAGE}"
 
 LAN_IP=$(hostname -I | awk '{print $1}')
 if [[ "$GATEWAY_PORT" == "80" ]]; then
-  PUBLIC_URL="http://${LAN_IP}/"
+  LAN_URL="http://${LAN_IP}/"
   LOCAL_URL="http://127.0.0.1/"
 else
-  PUBLIC_URL="http://${LAN_IP}:${GATEWAY_PORT}/"
+  LAN_URL="http://${LAN_IP}:${GATEWAY_PORT}/"
   LOCAL_URL="http://127.0.0.1:${GATEWAY_PORT}/"
 fi
 
@@ -57,8 +72,14 @@ done
 
 if [[ "$healthy" -eq 1 ]]; then
   echo "Gateway is running."
-  echo "  URL (LAN):      ${PUBLIC_URL}"
+  echo "  URL (LAN):      ${LAN_URL}"
   echo "  URL (local):    ${LOCAL_URL}"
+  if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
+    echo "  URL (public):   https://${PUBLIC_BASE_DOMAIN}/"
+    echo "  Domain mode:    subdomain proxy (https://<user>.${PUBLIC_BASE_DOMAIN}/)"
+  else
+    echo "  Domain mode:    LAN (set gateway/domain or PUBLIC_BASE_DOMAIN for Cloudflare)"
+  fi
   echo "  Listening port: ${GATEWAY_PORT} (not 8080 — that is a separate service on this host)"
 else
   echo "Gateway container started but health check failed on ${LOCAL_URL}" >&2

@@ -14,7 +14,24 @@ PASSWORD=$(openssl rand -base64 16)
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOG_DIR="$SCRIPT_DIR/logs"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
+DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
+NETWORK="debug-server-net"
 HOME_DIR="/home/$USERNAME"
+
+PUBLIC_BASE_DOMAIN="${PUBLIC_BASE_DOMAIN:-}"
+if [[ -z "$PUBLIC_BASE_DOMAIN" && -f "$DOMAIN_FILE" ]]; then
+  PUBLIC_BASE_DOMAIN=$(tr -d '[:space:]' < "$DOMAIN_FILE")
+fi
+PUBLIC_BASE_DOMAIN=$(echo "$PUBLIC_BASE_DOMAIN" | tr '[:upper:]' '[:lower:]')
+
+# Subdomains must be a single DNS label
+if [[ -n "$PUBLIC_BASE_DOMAIN" && ! "$USERNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$ ]]; then
+  echo "Username '$USERNAME' is not valid as a subdomain of ${PUBLIC_BASE_DOMAIN}." >&2
+  echo "Use letters, numbers, and hyphens only (e.g. alice, user1)." >&2
+  exit 1
+fi
+
+docker network create "$NETWORK" 2>/dev/null || true
 
 # reset this user's container
 docker rm -f "code-$USERNAME" 2>/dev/null || true
@@ -104,6 +121,7 @@ PY
 
 if ! docker run -d \
   --name "code-$USERNAME" \
+  --network "$NETWORK" \
   --memory=768m \
   --memory-swap=768m \
   --cpus=1.0 \
@@ -127,5 +145,9 @@ LAN_IP=$(hostname -I | awk '{print $1}')
 echo "USERNAME: $USERNAME"
 echo "Port: $PORT"
 echo "Password: $PASSWORD"
-echo "Direct URL: http://${LAN_IP}:${PORT}/"
-echo "Gateway URL: http://${LAN_IP}/ (enter username on login screen)"
+echo "Direct URL (LAN): http://${LAN_IP}:${PORT}/"
+echo "Gateway URL (LAN): http://${LAN_IP}/ (enter username on login screen)"
+if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
+  echo "Public gateway: https://${PUBLIC_BASE_DOMAIN}/"
+  echo "Public workspace: https://${USERNAME}.${PUBLIC_BASE_DOMAIN}/"
+fi

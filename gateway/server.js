@@ -1,8 +1,28 @@
 const express = require("express");
 const fs = require("fs");
+const httpProxy = require("http-proxy");
 
 const PORT = Number(process.env.PORT || 8080);
 const USERS_FILE = process.env.USERS_FILE || "/data/users.json";
+const PUBLIC_BASE_DOMAIN = (process.env.PUBLIC_BASE_DOMAIN || "").trim().toLowerCase();
+
+const proxy = httpProxy.createProxyServer({
+  xfwd: true,
+  // Keep the browser Host header (alice.example.com) so code-server
+  // generates correct absolute URLs behind Cloudflare Tunnel.
+  changeOrigin: false,
+  ws: true,
+});
+
+proxy.on("error", (err, _req, res) => {
+  console.error("proxy error:", err.message);
+  if (res && !res.headersSent && typeof res.writeHead === "function") {
+    res.writeHead(502, { "Content-Type": "text/plain" });
+    res.end("Workspace unavailable. Is the student container running?");
+  } else if (res && typeof res.destroy === "function") {
+    res.destroy();
+  }
+});
 
 function loadUsers() {
   try {
@@ -13,15 +33,27 @@ function loadUsers() {
   }
 }
 
-function getPortForUser(users, username) {
-  const entry = users[username];
-  if (entry == null) {
+function findUsername(users, username) {
+  if (!username) {
     return null;
   }
+  if (Object.prototype.hasOwnProperty.call(users, username)) {
+    return username;
+  }
+  const lower = username.toLowerCase();
+  return Object.keys(users).find((u) => u.toLowerCase() === lower) || null;
+}
+
+function getPortForUser(users, username) {
+  const key = findUsername(users, username);
+  if (key == null) {
+    return null;
+  }
+  const entry = users[key];
   if (typeof entry === "number") {
     return entry;
   }
-  if (typeof entry === "object" && entry.port != null) {
+  if (typeof entry === "object" && entry != null && entry.port != null) {
     return Number(entry.port);
   }
   return null;
@@ -33,6 +65,38 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** @returns {string|null} subdomain username, or null for apex / non-public hosts */
+function getSubdomainUser(hostname) {
+  if (!PUBLIC_BASE_DOMAIN) {
+    return null;
+  }
+  const host = String(hostname || "")
+    .toLowerCase()
+    .split(":")[0];
+  if (!host || host === PUBLIC_BASE_DOMAIN || host === `www.${PUBLIC_BASE_DOMAIN}`) {
+    return null;
+  }
+  const suffix = `.${PUBLIC_BASE_DOMAIN}`;
+  if (!host.endsWith(suffix)) {
+    return null;
+  }
+  const sub = host.slice(0, -suffix.length);
+  // Only single-label student subdomains (alice.domain.com)
+  if (!sub || sub.includes(".")) {
+    return null;
+  }
+  return sub;
+}
+
+function workspaceTarget(username) {
+  return `http://code-${username}:8080`;
+}
+
+function publicWorkspaceUrl(username, query) {
+  const qs = query ? `?${query}` : "";
+  return `https://${username}.${PUBLIC_BASE_DOMAIN}/${qs}`;
 }
 
 function renderLoginPage({ error } = {}) {
@@ -143,6 +207,30 @@ function renderLoginPage({ error } = {}) {
 }
 
 const app = express();
+app.set("trust proxy", true);
+
+// Subdomain → student container (Cloudflare Tunnel path).
+// Must run BEFORE body parsers — otherwise POST bodies (e.g. code-server
+// password login) are consumed and the proxied request hangs forever.
+app.use((req, res, next) => {
+  const sub = getSubdomainUser(req.hostname);
+  if (!sub) {
+    return next();
+  }
+
+  const users = loadUsers();
+  const username = findUsername(users, sub);
+  if (!username) {
+    return res
+      .status(404)
+      .type("text")
+      .send(`Unknown workspace "${sub}".`);
+  }
+
+  proxy.web(req, res, { target: workspaceTarget(username) });
+});
+
+// Body parser only for apex gateway routes (not proxied subdomains).
 app.use(express.urlencoded({ extended: false }));
 
 app.get("/", (_req, res) => {
@@ -154,27 +242,56 @@ app.get("/login", (_req, res) => {
 });
 
 app.post("/login", (req, res) => {
-  const username = String(req.body.username || "").trim();
-  if (!username) {
+  const requested = String(req.body.username || "").trim();
+  if (!requested) {
     return res
       .status(400)
       .type("html")
       .send(renderLoginPage({ error: "Please enter a username." }));
   }
 
-  const port = getPortForUser(loadUsers(), username);
-  if (port == null || Number.isNaN(port)) {
+  const users = loadUsers();
+  const username = findUsername(users, requested);
+  const port = username ? getPortForUser(users, username) : null;
+  if (!username || port == null || Number.isNaN(port)) {
     return res
       .status(404)
       .type("html")
       .send(renderLoginPage({ error: "Unknown username." }));
   }
 
+  const query = `folder=/home/coder&user=${encodeURIComponent(username)}`;
+
+  if (PUBLIC_BASE_DOMAIN) {
+    return res.redirect(302, publicWorkspaceUrl(username, query));
+  }
+
   const hostname = req.hostname;
-  const target = `${req.protocol}://${hostname}:${port}/?folder=/home/coder&user=${encodeURIComponent(username)}`;
+  const target = `${req.protocol}://${hostname}:${port}/?${query}`;
   res.redirect(302, target);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`gateway listening on ${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  const mode = PUBLIC_BASE_DOMAIN
+    ? `public domain ${PUBLIC_BASE_DOMAIN} (subdomain proxy enabled)`
+    : "LAN mode (port redirects)";
+  console.log(`gateway listening on ${PORT} — ${mode}`);
+});
+
+server.on("upgrade", (req, socket, head) => {
+  const host = (req.headers.host || "").split(":")[0];
+  const sub = getSubdomainUser(host);
+  if (!sub) {
+    socket.destroy();
+    return;
+  }
+
+  const users = loadUsers();
+  const username = findUsername(users, sub);
+  if (!username) {
+    socket.destroy();
+    return;
+  }
+
+  proxy.ws(req, socket, head, { target: workspaceTarget(username) });
 });

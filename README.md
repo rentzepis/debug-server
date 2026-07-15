@@ -82,7 +82,8 @@ For code-server-only changes (see [Session monitoring](#session-monitoring)), us
 
 This (re)creates a container for the user and prints a new password. Students can open
 `http://<SERVER_IP>:<PORT>` and log in with that password, or use the gateway login
-screen at `http://<SERVER_IP>/` and enter their username to be redirected.
+screen at `http://<SERVER_IP>/` (LAN) or `https://213-debug.com/` (Cloudflare) and
+enter their username to be redirected.
 
 - Assign a unique port per student (e.g. 9001–9099).
 - Reassigning a port to a different user frees the old container on that port, updates the
@@ -91,6 +92,7 @@ screen at `http://<SERVER_IP>/` and enter their username to be redirected.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
 - `create_codeserver.sh` registers each username in `gateway/users.json` for gateway routing.
+- Containers join `debug-server-net` so the gateway can proxy `https://<user>.213-debug.com/`.
 - Session monitoring is enabled by default; logs go to `logs/<username>-session-monitoring.jsonl`
   (see [Session monitoring](#session-monitoring)).
 - A bash terminal opens automatically as an editor tab when the workspace loads. Re-running `create_codeserver.sh`
@@ -113,12 +115,100 @@ Start the shared login screen on port 80 (or override with `GATEWAY_PORT`):
 ./start-gateway.sh
 ```
 
-Students visit `http://<SERVER_IP>/`, enter their username, and are redirected to their
-assigned port. They still log in to code-server with the password printed by
-`create_codeserver.sh`.
+The public domain is read from `gateway/domain` (currently `213-debug.com`), or from
+`PUBLIC_BASE_DOMAIN` if set in the environment.
+
+- **LAN:** Students visit `http://<SERVER_IP>/`, enter their username, and are redirected
+  to `http://<SERVER_IP>:<PORT>/`.
+- **Public (Cloudflare):** Students visit `https://213-debug.com/`, enter their username,
+  and are redirected to `https://<username>.213-debug.com/`. The gateway reverse-proxies
+  that subdomain to the student's container (including WebSockets).
+
+They still log in to code-server with the password printed by `create_codeserver.sh`.
 
 The gateway reads username-to-port mappings from `gateway/users.json`, which is updated
 automatically when you run `create_codeserver.sh`.
+
+## Public access (Cloudflare Tunnel)
+
+Use a tunnel so the laptop does not need a public IP or port-forwarding. The site is
+only reachable while the laptop is awake and `cloudflared` is running.
+
+### 1. Set the domain
+
+`gateway/domain` should contain your apex domain:
+
+```
+213-debug.com
+```
+
+Rebuild/restart the gateway after changing it:
+
+```bash
+./start-gateway.sh
+```
+
+### 2. Create a tunnel in Cloudflare
+
+1. [Cloudflare Dashboard](https://one.dash.cloudflare.com/) → **Zero Trust** → **Networks** → **Tunnels**
+2. **Create a tunnel** → **Cloudflared** → name it (e.g. `debug-laptop`)
+3. Install with the token command Cloudflare shows (runs as a service on the laptop)
+
+### 3. Add public hostnames
+
+In the tunnel’s **Public Hostname** tab, add:
+
+| Subdomain | Domain | Type | URL |
+|-----------|--------|------|-----|
+| *(empty)* | `213-debug.com` | HTTP | `http://localhost:80` |
+| `*` | `213-debug.com` | HTTP | `http://localhost:80` |
+
+Cloudflare auto-creates DNS for the apex hostname, but **not** for the wildcard
+(you’ll see a yellow warning). Add it yourself:
+
+1. **DNS** → **Records** → **Add record**
+2. Type **CNAME**, Name `*`, Proxy **on** (orange cloud)
+3. Target = the same `….cfargotunnel.com` value used by the existing `213-debug.com`
+   CNAME (visible in **DNS → Records**, or under **Zero Trust → Tunnels → your tunnel**)
+
+Confirm resolution before testing login:
+
+```bash
+dig +short user1.213-debug.com   # should return Cloudflare IPs, not NXDOMAIN
+```
+
+See `cloudflare-tunnel.example.yml` if you prefer a config-file tunnel instead of the
+token installer.
+
+### 4. Create students and share URLs
+
+```bash
+./create_codeserver.sh alice 9001
+```
+
+Share:
+
+- Gateway: `https://213-debug.com/`
+- Workspace: `https://alice.213-debug.com/`
+- Password: printed by the script
+
+### Notes
+
+- Keep `./start-gateway.sh` running (port 80) whenever you want the public site up.
+- After changing the gateway code or `gateway/domain`, rerun `./start-gateway.sh`.
+- Student usernames become subdomains — use letters, numbers, and hyphens only.
+- Existing student containers must be on `debug-server-net` (re-run `create_codeserver.sh`)
+  for public subdomain proxying to work.
+- LAN URLs (`http://<ip>:<port>`) still work on the classroom network alongside Cloudflare.
+- When you move off the laptop later, install the same tunnel token on the always-on host.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `Firefox can’t connect to … user1.213-debug.com` | Wildcard DNS missing — add the `*` CNAME (step 3) |
+| `dig` shows `NXDOMAIN` for a student subdomain | Same as above |
+| Apex works, subdomain hangs on password login | Ensure gateway was rebuilt after the subdomain-proxy fix (`./start-gateway.sh`) |
 
 ## LAN hosting
 

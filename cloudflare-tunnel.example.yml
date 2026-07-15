@@ -1,0 +1,22 @@
+# Example Cloudflare Tunnel ingress for 213-debug.com
+#
+# Prefer the Zero Trust dashboard (easier with a token-based tunnel):
+#   1. Public hostname: 213-debug.com      → http://localhost:80
+#   2. Public hostname: *.213-debug.com    → http://localhost:80
+#
+# Wildcard note: Cloudflare will NOT auto-create DNS for *.213-debug.com.
+# In DNS → Records, add a Proxied CNAME:
+#   Name: *
+#   Target: <same>.cfargotunnel.com as the apex 213-debug.com record
+#
+# If you use a config file instead of the token installer:
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /home/<you>/.cloudflared/<YOUR_TUNNEL_ID>.json
+
+ingress:
+  - hostname: 213-debug.com
+    service: http://localhost:80
+  - hostname: "*.213-debug.com"
+    service: http://localhost:80
+  - service: http_status:404
