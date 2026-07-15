@@ -1,1 +1,3 @@
 .session_secret
+.env
+node_modules/

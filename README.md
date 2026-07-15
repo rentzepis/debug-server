@@ -29,7 +29,7 @@ Example lines:
 
 | Label | Meaning |
 |-------|---------|
-| `LOGIN` | Student authenticated to code-server |
+| `LOGIN` | Student authenticated (via gateway Google SSO) |
 | `LOGOUT` | Student signed out |
 | `FOCUS` | Browser window gained focus |
 | `BLUR` | Browser window lost focus (another app focused) |
@@ -74,40 +74,74 @@ For code-server-only changes (see [Session monitoring](#session-monitoring)), us
 ./build.sh --fast
 ```
 
+## Google SSO setup
+
+Students sign in with their `@andrew.cmu.edu` Google account. Only Andrew IDs that you
+have provisioned with `create_codeserver.sh` can open a workspace (that file is the
+allowlist). code-server password auth is disabled.
+
+### 1. Create a Google OAuth client
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services** → **Credentials**
+2. **Create credentials** → **OAuth client ID** → Application type **Web application**
+3. Add **Authorized redirect URIs**:
+   - `https://213-debug.com/auth/google/callback` (production via Cloudflare)
+   - `http://localhost/auth/google/callback` (local testing with port 80)
+4. Copy the client ID and client secret
+
+Configure the OAuth consent screen for your project (External or Internal). Students
+must be able to sign in with Google Workspace accounts on `andrew.cmu.edu`.
+
+### 2. Store credentials
+
+```bash
+cp gateway/.env.example gateway/.env
+# edit gateway/.env and set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+```
+
+`gateway/.env` is gitignored. Optional: `GOOGLE_ALLOWED_DOMAIN=andrew.cmu.edu` (default).
+
+### 3. Start the gateway
+
+```bash
+./start-gateway.sh
+```
+
+The gateway refuses to start if Google credentials are missing.
+
 ## Create per-user environment
 
 ```bash
-./create_codeserver.sh <USERNAME> <PORT> [clean]
+./create_codeserver.sh <ANDREW_ID> <PORT> [clean]
 ```
 
-This (re)creates a container for the user and prints a new password. Students can open
-`http://<SERVER_IP>:<PORT>` and log in with that password, or use the gateway login
-screen at `http://<SERVER_IP>/` (LAN) or `https://213-debug.com/` (Cloudflare) and
-enter their username to be redirected.
+Use the student's Andrew ID as the username (e.g. `jsmith` for `jsmith@andrew.cmu.edu`).
+This (re)creates their container with `auth: none` and registers them in
+`gateway/users.json` (the SSO allowlist). Ports are bound to `127.0.0.1` only — students
+must go through the gateway.
 
 - Assign a unique port per student (e.g. 9001–9099).
-- Reassigning a port to a different user frees the old container on that port, updates the
-  gateway mapping, and prints a new password for the new user.
+- Reassigning a port to a different user frees the old container on that port and updates
+  the gateway mapping.
 - Without `clean`, only the code-server config is reset; the user's home directory is kept.
 - With `clean`, the entire user environment is wiped and recreated from starter files.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
-- `create_codeserver.sh` registers each username in `gateway/users.json` for gateway routing.
-- Containers join `debug-server-net` so the gateway can proxy `https://<user>.213-debug.com/`.
-- Session monitoring is enabled by default; logs go to `logs/<username>-session-monitoring.jsonl`
+- Containers join `debug-server-net` so the gateway can proxy `https://<andrewid>.213-debug.com/`.
+- Session monitoring is enabled by default; logs go to `logs/<andrewid>-session-monitoring.jsonl`
   (see [Session monitoring](#session-monitoring)).
-- A bash terminal opens automatically as an editor tab when the workspace loads. Re-running `create_codeserver.sh`
-  deploys the auto-terminal extension, `.vscode/tasks.json`, and settings needed for this behavior
-  (workspace trust is disabled so Restricted Mode does not block startup terminals).
+- A bash terminal opens automatically as an editor tab when the workspace loads.
+- **Recreate existing containers** after enabling SSO so `auth: none` and localhost-only
+  ports take effect.
 
 Example:
 
 ```bash
-./create_codeserver.sh alice 9001
-./create_codeserver.sh bob   9002
-./create_codeserver.sh alice 9001 clean   # full reset for alice
+./create_codeserver.sh jsmith 9001
+./create_codeserver.sh ada    9002
+./create_codeserver.sh jsmith 9001 clean   # full reset for jsmith
 ```
 
-## Gateway login
+## Gateway login (Google SSO)
 
 Start the shared login screen on port 80 (or override with `GATEWAY_PORT`):
 
@@ -118,16 +152,20 @@ Start the shared login screen on port 80 (or override with `GATEWAY_PORT`):
 The public domain is read from `gateway/domain` (currently `213-debug.com`), or from
 `PUBLIC_BASE_DOMAIN` if set in the environment.
 
-- **LAN:** Students visit `http://<SERVER_IP>/`, enter their username, and are redirected
-  to `http://<SERVER_IP>:<PORT>/`.
-- **Public (Cloudflare):** Students visit `https://213-debug.com/`, enter their username,
-  and are redirected to `https://<username>.213-debug.com/`. The gateway reverse-proxies
-  that subdomain to the student's container (including WebSockets).
+Student flow:
 
-They still log in to code-server with the password printed by `create_codeserver.sh`.
+1. Open `https://213-debug.com/` (or `http://<SERVER_IP>/` on LAN)
+2. **Sign in with Google** using `@andrew.cmu.edu`
+3. Land in their own workspace (`https://<andrewid>.213-debug.com/` publicly, or the
+   gateway apex on LAN)
 
-The gateway reads username-to-port mappings from `gateway/users.json`, which is updated
-automatically when you run `create_codeserver.sh`.
+Rules enforced by the gateway:
+
+- Google ID token must have hosted domain `andrew.cmu.edu` and a verified email
+- Email local-part (Andrew ID) must exist in `gateway/users.json`
+- Session cookie is bound to that Andrew ID — students cannot open someone else's workspace
+
+Google’s `hd` UI hint is not enough on its own; the gateway verifies the ID token claims.
 
 ## Public access (Cloudflare Tunnel)
 
@@ -183,23 +221,24 @@ token installer.
 ### 4. Create students and share URLs
 
 ```bash
-./create_codeserver.sh alice 9001
+./create_codeserver.sh jsmith 9001
 ```
 
 Share:
 
-- Gateway: `https://213-debug.com/`
-- Workspace: `https://alice.213-debug.com/`
-- Password: printed by the script
+- Gateway: `https://213-debug.com/` (Sign in with Google)
+- Workspace (after SSO): `https://jsmith.213-debug.com/`
+
+No password — Google SSO is the only login.
 
 ### Notes
 
 - Keep `./start-gateway.sh` running (port 80) whenever you want the public site up.
 - After changing the gateway code or `gateway/domain`, rerun `./start-gateway.sh`.
-- Student usernames become subdomains — use letters, numbers, and hyphens only.
+- Student Andrew IDs become subdomains — use letters, numbers, and hyphens only.
 - Existing student containers must be on `debug-server-net` (re-run `create_codeserver.sh`)
   for public subdomain proxying to work.
-- LAN URLs (`http://<ip>:<port>`) still work on the classroom network alongside Cloudflare.
+- Prefer Cloudflare HTTPS for Google OAuth; raw LAN IPs are awkward as Google redirect URIs.
 - When you move off the laptop later, install the same tunnel token on the always-on host.
 
 ### Troubleshooting
@@ -208,19 +247,26 @@ Share:
 |---------|-----|
 | `Firefox can’t connect to … user1.213-debug.com` | Wildcard DNS missing — add the `*` CNAME (step 3) |
 | `dig` shows `NXDOMAIN` for a student subdomain | Same as above |
-| Apex works, subdomain hangs on password login | Ensure gateway was rebuilt after the subdomain-proxy fix (`./start-gateway.sh`) |
-
+| Gateway fails to start | Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `gateway/.env` |
+| “Not enrolled” after Google sign-in | Run `create_codeserver.sh <andrewid> <port>` for that student |
+| Sign-in fails with redirect URI mismatch | Add the exact callback URL in Google Cloud Console |
+| Apex works, subdomain asks to sign in again | Cookie domain / HTTPS — ensure tunnel terminates TLS and gateway was rebuilt |
 ## LAN hosting
 
-The setup is already LAN-capable: Docker publishes each student's port on all host
-interfaces, and code-server listens on `0.0.0.0` inside the container. No extra
-networking configuration is required.
+Student containers are published on `127.0.0.1` only. Classroom access goes through the
+gateway on port 80, which enforces Google SSO and proxies each signed-in user to their
+own container.
+
+Google OAuth works best over HTTPS (Cloudflare Tunnel). For a LAN-only host, register
+`http://localhost/auth/google/callback` (or the LAN URL if Google allows it) as a
+redirect URI, or use the Cloudflare tunnel from the classroom network.
 
 ### Host requirements
 
 - A Linux machine on the same network as students (classroom server, lab PC, etc.)
 - Docker installed and running
-- Enough RAM and disk for one shared image (~2 GB) plus per-student home dirs under `/home/<username>`
+- Google OAuth credentials in `gateway/.env` (see [Google SSO setup](#google-sso-setup))
+- Enough RAM and disk for one shared image (~2 GB) plus per-student home dirs under `/home/<andrewid>`
 
 ### Find the host LAN IP
 
@@ -237,51 +283,49 @@ not Docker bridge IPs like `172.17.0.1`.
 
 ### Give students access
 
-After running `create_codeserver.sh`, share:
+After running `create_codeserver.sh` and `./start-gateway.sh`, share:
 
-- Gateway URL: `http://<SERVER_IP>/` (students enter their username, then log in)
-- Direct URL: `http://<SERVER_IP>:9001` (replace with your host IP and the student's port)
-- Password: printed by the script
+- Gateway URL: `http://<SERVER_IP>/` (Sign in with Google)
 
-Start the gateway once per host with `./start-gateway.sh`.
+Do not share direct `:<PORT>` URLs — those ports are localhost-only on the host.
 
 ### Firewall
 
-If `ufw` or a similar firewall is enabled, allow the student port range from the LAN only:
+If `ufw` or a similar firewall is enabled, allow the gateway only:
 
 ```bash
 sudo ufw allow 80/tcp
-sudo ufw allow from 192.168.0.0/16 to any port 9001:9099 proto tcp
 ```
 
-Adjust the subnet to match your network (e.g. `10.0.0.0/8`).
+Student code-server ports no longer need to be opened on the LAN.
 
 ### Stay LAN-only
 
-- Do **not** set up router port-forwarding for these ports.
-- Password auth is enabled by default.
-- HTTP on a trusted classroom LAN is fine; HTTPS is optional and adds certificate complexity.
+- Do **not** set up router port-forwarding.
+- Auth is Google SSO via the gateway (`auth: none` inside each container).
+- Prefer Cloudflare HTTPS when possible so Google redirect URIs stay simple.
 
 ### Troubleshooting
 
 | Symptom | Check |
 |---------|-------|
-| Works on host, not from other devices | Wrong IP (used localhost or a Docker bridge IP); firewall blocking the port |
-| Connection refused | Container not running: `docker ps`; recreate with `create_codeserver.sh` |
-| Page loads but IDE is broken | Students should use `http://`, not `https://`, unless TLS is configured |
+| Works on host, not from other devices | Wrong IP (used localhost or a Docker bridge IP); firewall blocking port 80 |
+| Connection refused | Gateway not running: `docker ps`; restart with `./start-gateway.sh` |
+| Page loads but IDE is broken | Students should use `http://` on LAN, or `https://` via Cloudflare |
+| Google redirect_uri_mismatch | Register the exact callback URL students hit in Google Cloud Console |
 
-To confirm a port is published:
+To confirm a student port is localhost-only:
 
 ```bash
-docker port code-<USERNAME>
-# should show 0.0.0.0:<PORT>
+docker port code-<ANDREW_ID>
+# should show 127.0.0.1:<PORT>
 ```
 
-### Verify LAN access
+### Verify access
 
 1. On the host: `./create_codeserver.sh testuser 9001`
-2. From another device on the same network, open `http://<host-lan-ip>:9001`
-3. Log in with the printed password
+2. Ensure `gateway/.env` has Google credentials; run `./start-gateway.sh`
+3. From a browser, open the gateway URL and sign in with a provisioned `@andrew.cmu.edu` account
 
 ## Notes
 

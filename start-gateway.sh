@@ -7,6 +7,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 NETWORK="debug-server-net"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 SECRET_FILE="$SCRIPT_DIR/gateway/.session_secret"
+ENV_FILE="$SCRIPT_DIR/gateway/.env"
 DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
 IMAGE="gateway-image"
 GATEWAY_PORT="${GATEWAY_PORT:-80}"
@@ -17,6 +18,27 @@ if [[ -z "$PUBLIC_BASE_DOMAIN" && -f "$DOMAIN_FILE" ]]; then
   PUBLIC_BASE_DOMAIN=$(tr -d '[:space:]' < "$DOMAIN_FILE")
 fi
 PUBLIC_BASE_DOMAIN=$(echo "$PUBLIC_BASE_DOMAIN" | tr '[:upper:]' '[:lower:]')
+
+# Load Google OAuth credentials from gateway/.env (KEY=VALUE lines)
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
+GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
+GOOGLE_ALLOWED_DOMAIN="${GOOGLE_ALLOWED_DOMAIN:-andrew.cmu.edu}"
+
+if [[ -z "$GOOGLE_CLIENT_ID" || -z "$GOOGLE_CLIENT_SECRET" ]]; then
+  echo "Google SSO is required but credentials are missing." >&2
+  echo "Copy gateway/.env.example to gateway/.env and set:" >&2
+  echo "  GOOGLE_CLIENT_ID" >&2
+  echo "  GOOGLE_CLIENT_SECRET" >&2
+  echo "See README.md for Google Cloud Console setup." >&2
+  exit 1
+fi
 
 docker network create "$NETWORK" 2>/dev/null || true
 
@@ -38,6 +60,9 @@ docker rm -f gateway 2>/dev/null || true
 DOCKER_ENV=(
   -e SESSION_SECRET="$SESSION_SECRET"
   -e USERS_FILE=/data/users.json
+  -e GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
+  -e GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+  -e GOOGLE_ALLOWED_DOMAIN="$GOOGLE_ALLOWED_DOMAIN"
 )
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
@@ -71,14 +96,15 @@ for _ in 1 2 3 4 5; do
 done
 
 if [[ "$healthy" -eq 1 ]]; then
-  echo "Gateway is running."
+  echo "Gateway is running (Google SSO enabled)."
+  echo "  Allowed domain: @${GOOGLE_ALLOWED_DOMAIN}"
   echo "  URL (LAN):      ${LAN_URL}"
   echo "  URL (local):    ${LOCAL_URL}"
   if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
     echo "  URL (public):   https://${PUBLIC_BASE_DOMAIN}/"
-    echo "  Domain mode:    subdomain proxy (https://<user>.${PUBLIC_BASE_DOMAIN}/)"
+    echo "  Domain mode:    subdomain proxy (https://<andrewid>.${PUBLIC_BASE_DOMAIN}/)"
   else
-    echo "  Domain mode:    LAN (set gateway/domain or PUBLIC_BASE_DOMAIN for Cloudflare)"
+    echo "  Domain mode:    LAN apex proxy (set gateway/domain or PUBLIC_BASE_DOMAIN for Cloudflare)"
   fi
   echo "  Listening port: ${GATEWAY_PORT} (not 8080 — that is a separate service on this host)"
 else

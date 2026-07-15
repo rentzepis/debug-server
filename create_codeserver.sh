@@ -6,11 +6,11 @@ PORT=$2
 CLEAN=$3
 
 if [[ -z "$USERNAME" || -z "$PORT" ]]; then
-  echo "Usage: $0 <username> <port> [clean]" >&2
+  echo "Usage: $0 <andrew-id> <port> [clean]" >&2
+  echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
   exit 1
 fi
 
-PASSWORD=$(openssl rand -base64 16)
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 LOG_DIR="$SCRIPT_DIR/logs"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
@@ -27,7 +27,7 @@ PUBLIC_BASE_DOMAIN=$(echo "$PUBLIC_BASE_DOMAIN" | tr '[:upper:]' '[:lower:]')
 # Subdomains must be a single DNS label
 if [[ -n "$PUBLIC_BASE_DOMAIN" && ! "$USERNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$ ]]; then
   echo "Username '$USERNAME' is not valid as a subdomain of ${PUBLIC_BASE_DOMAIN}." >&2
-  echo "Use letters, numbers, and hyphens only (e.g. alice, user1)." >&2
+  echo "Use the student's Andrew ID (letters, numbers, and hyphens only)." >&2
   exit 1
 fi
 
@@ -51,7 +51,7 @@ if [[ "$CLEAN" == "clean" ]]; then
 else
   # keep the rest of the user's environment intact, only reset the code-server config/workspace
   rm -rf "$HOME_DIR/.local/share/code-server"
-  # drop stale password so the new PASSWORD env is what code-server persists next
+  # drop stale config so auth: none is what code-server picks up next
   rm -f "$HOME_DIR/.config/code-server/config.yaml"
 fi
 
@@ -97,6 +97,14 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
 }
 EOF
 
+# Gateway Google SSO is the only auth gate; disable code-server passwords.
+mkdir -p "$HOME_DIR/.config/code-server"
+cat > "$HOME_DIR/.config/code-server/config.yaml" <<'EOF'
+bind-addr: 0.0.0.0:8080
+auth: none
+cert: false
+EOF
+
 chown -R 1000:1000 "$HOME_DIR"
 
 mkdir -p "$(dirname "$USERS_FILE")"
@@ -127,7 +135,6 @@ if ! docker run -d \
   --cpus=1.0 \
   --security-opt=no-new-privileges:true \
   --restart unless-stopped \
-  -e PASSWORD="$PASSWORD" \
   -e CODE_SERVER_USERNAME="$USERNAME" \
   -e NODE_OPTIONS="--max-old-space-size=384" \
   -e CODE_SERVER_SESSION_MONITORING=1 \
@@ -135,19 +142,20 @@ if ! docker run -d \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
-  -p "$PORT":8080 \
-  code-server-image; then
+  -p "127.0.0.1:$PORT":8080 \
+  code-server-image \
+  node /opt/code-server/out/node/entry.js --bind-addr 0.0.0.0:8080 --auth none; then
   echo "Failed to start container for $USERNAME on port $PORT" >&2
   exit 1
 fi
 
 LAN_IP=$(hostname -I | awk '{print $1}')
-echo "USERNAME: $USERNAME"
-echo "Port: $PORT"
-echo "Password: $PASSWORD"
-echo "Direct URL (LAN): http://${LAN_IP}:${PORT}/"
-echo "Gateway URL (LAN): http://${LAN_IP}/ (enter username on login screen)"
+echo "USERNAME (Andrew ID): $USERNAME"
+echo "Port (localhost only): $PORT"
+echo "Auth: Google SSO via gateway (no password)"
+echo "Gateway URL (LAN): http://${LAN_IP}/"
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   echo "Public gateway: https://${PUBLIC_BASE_DOMAIN}/"
   echo "Public workspace: https://${USERNAME}.${PUBLIC_BASE_DOMAIN}/"
 fi
+echo "Note: only students provisioned here (and @andrew.cmu.edu) can sign in."

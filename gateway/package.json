@@ -4,7 +4,11 @@
   "private": true,
   "main": "server.js",
   "dependencies": {
+    "cookie-session": "^2.1.0",
+    "cookies": "^0.9.1",
     "express": "^4.21.2",
-    "http-proxy": "^1.18.1"
+    "google-auth-library": "^9.15.1",
+    "http-proxy": "^1.18.1",
+    "keygrip": "^1.1.0"
   }
 }
