@@ -34,7 +34,7 @@ touch "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 chown -R 1000:1000 "$LOG_DIR"
 
 # copy starter files
-cp -r starter/proxylab-handout/ "$HOME_DIR/"
+cp -r starter/proxylab-handout/. "$HOME_DIR/"
 
 STUDENT_CODE="$SCRIPT_DIR/student-code/$USERNAME.c"
 if [[ -f "$STUDENT_CODE" ]]; then
