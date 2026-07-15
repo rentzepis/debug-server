@@ -56,6 +56,30 @@ docker build -f Dockerfile.routes -t code-server-image .
 
 Then recreate the student's container with `create_codeserver.sh`.
 
+### Clipboard restrictions
+
+Copy and paste are disabled in student containers by default. The restriction
+uses three layers:
+
+1. A browser script injected into the workbench that blocks clipboard events,
+   paste/cut shortcuts (and Ctrl/Cmd+Shift+C/V), and `navigator.clipboard`
+   access. Bare Ctrl+C is left alone so the terminal can still send interrupt.
+2. VS Code keybinding overrides that unbind editor and terminal copy/paste
+   shortcuts.
+3. A VS Code clipboard-service patch (via `CODE_SERVER_DISABLE_CLIPBOARD=1`,
+   set automatically by `create_codeserver.sh`) that no-ops internal clipboard
+   read/write, including menu and command-palette actions.
+
+To disable clipboard restrictions for a container, omit or set
+`CODE_SERVER_DISABLE_CLIPBOARD=0` when running the container.
+
+**Rebuild notes:**
+
+- Code-server source changes (`code-server/src/**`): `./build.sh --fast`
+- Clipboard-service or VS Code patch changes: full `./build.sh`
+
+Recreate affected student containers after rebuilding.
+
 The insecure-context warning is suppressed automatically (via an injected dismiss script on
 current images, and by removing the upstream notification patch in future full builds).
 

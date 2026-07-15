@@ -140,6 +140,7 @@ cp "$SCRIPT_DIR/extensions/auto-terminal/extension.js" "$EXT_DIR/"
 cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
 {
   "workbench.colorTheme": "Dark 2026",
+  "editor.selectionClipboard": false,
   "task.allowAutomaticTasks": "on",
   "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.defaultLocation": "editor",
@@ -157,6 +158,22 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
     "debug-server.auto-terminal": true
   }
 }
+EOF
+cat > "$CODE_SERVER_USER_DIR/keybindings.json" <<'EOF'
+[
+  { "key": "ctrl+c", "command": "-editor.action.clipboardCopyAction" },
+  { "key": "cmd+c", "command": "-editor.action.clipboardCopyAction" },
+  { "key": "ctrl+v", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "cmd+v", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "ctrl+x", "command": "-editor.action.clipboardCutAction" },
+  { "key": "cmd+x", "command": "-editor.action.clipboardCutAction" },
+  { "key": "ctrl+shift+c", "command": "-workbench.action.terminal.copySelection" },
+  { "key": "cmd+shift+c", "command": "-workbench.action.terminal.copySelection" },
+  { "key": "ctrl+shift+v", "command": "-workbench.action.terminal.paste" },
+  { "key": "cmd+shift+v", "command": "-workbench.action.terminal.paste" },
+  { "key": "shift+insert", "command": "-editor.action.clipboardPasteAction" },
+  { "key": "ctrl+insert", "command": "-editor.action.clipboardCopyAction" }
+]
 EOF
 
 # Gateway Google SSO is the only auth gate; disable code-server passwords.
@@ -207,6 +224,7 @@ if ! docker run -d \
   -e NODE_OPTIONS="--max-old-space-size=384" \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
+  -e CODE_SERVER_DISABLE_CLIPBOARD=1 \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
