@@ -9,7 +9,9 @@
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
-                "focus": true
+                "focus": true,
+                "echo": false,
+                "showReuseMessage": false
             },
             "runOptions": {
                 "runOn": "folderOpen"
