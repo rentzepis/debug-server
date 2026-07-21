@@ -149,6 +149,9 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
   "chat.disableAIFeatures": true,
   "workbench.secondarySideBar.defaultVisibility": "hidden",
   "workbench.localHistory.enabled": false,
+  "remote.otherPortsAttributes": {
+    "onAutoForward": "silent"
+  },
   "files.exclude": {
     "**/.local": true,
     "**/.config": true
