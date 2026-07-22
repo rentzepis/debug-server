@@ -2,27 +2,74 @@
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 
 usage() {
-  echo "Usage: $0 <andrew-id> [clean]" >&2
-  echo "       $0 --all [clean]" >&2
+  echo "Usage: $0 <andrew-id> [--clean|--stop]" >&2
+  echo "       $0 --all [--clean|--stop]" >&2
   echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
-  echo "  --all recreates every enrolled user in gateway/users.json." >&2
+  echo "  --all     apply the action to every enrolled user in gateway/users.json." >&2
+  echo "  --clean   wipe the user's home and recreate the container from starter files." >&2
+  echo "  --stop    stop and remove the container (home directory is left alone)." >&2
   exit 1
 }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 
-# Recreate every enrolled Andrew ID from gateway/users.json
-if [[ "$1" == "--all" || "$1" == "-a" ]]; then
-  CLEAN_ALL="${2:-}"
-  if [[ -n "$CLEAN_ALL" && "$CLEAN_ALL" != "clean" ]]; then
-    usage
-  fi
-  if [[ ! -s "$USERS_FILE" ]]; then
-    echo "No enrolled users found in $USERS_FILE" >&2
-    exit 1
-  fi
-  mapfile -t ALL_USERS < <(python3 - "$USERS_FILE" <<'PY'
+DO_ALL=0
+CLEAN=0
+STOP=0
+USERNAME=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all|-a)
+      DO_ALL=1
+      ;;
+    --clean|-c|clean)
+      CLEAN=1
+      ;;
+    --stop|-s)
+      STOP=1
+      ;;
+    -h|--help)
+      usage
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage
+      ;;
+    *)
+      if [[ -n "$USERNAME" ]]; then
+        # Back-compat: old calls were <andrew-id> <port> [clean]
+        if [[ "$1" =~ ^[0-9]+$ ]]; then
+          echo "Warning: port argument is no longer used; containers are reached only via the gateway." >&2
+          shift
+          continue
+        fi
+        echo "Unexpected argument: $1" >&2
+        usage
+      fi
+      USERNAME=$1
+      ;;
+  esac
+  shift
+done
+
+if [[ "$CLEAN" -eq 1 && "$STOP" -eq 1 ]]; then
+  echo "Use either --clean or --stop, not both." >&2
+  usage
+fi
+
+if [[ "$DO_ALL" -eq 1 && -n "$USERNAME" ]]; then
+  echo "Use either --all or <andrew-id>, not both." >&2
+  usage
+fi
+
+if [[ "$DO_ALL" -eq 0 && -z "$USERNAME" ]]; then
+  usage
+fi
+
+enrolled_users() {
+  python3 - "$USERS_FILE" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -35,17 +82,34 @@ for key, value in sorted(users.items(), key=lambda item: item[0].lower()):
     elif isinstance(value, (int, float)) or value:
         print(key)
 PY
-)
+}
+
+# Apply the same action to every enrolled Andrew ID from gateway/users.json
+if [[ "$DO_ALL" -eq 1 ]]; then
+  if [[ ! -s "$USERS_FILE" ]]; then
+    echo "No enrolled users found in $USERS_FILE" >&2
+    exit 1
+  fi
+  mapfile -t ALL_USERS < <(enrolled_users)
   if [[ ${#ALL_USERS[@]} -eq 0 ]]; then
     echo "No enrolled users found in $USERS_FILE" >&2
     exit 1
   fi
-  echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE..."
+  EXTRA_FLAGS=()
+  if [[ "$STOP" -eq 1 ]]; then
+    EXTRA_FLAGS+=(--stop)
+    echo "Stopping ${#ALL_USERS[@]} user container(s) from $USERS_FILE..."
+  elif [[ "$CLEAN" -eq 1 ]]; then
+    EXTRA_FLAGS+=(--clean)
+    echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE (clean)..."
+  else
+    echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE..."
+  fi
   failed=0
   for andrew_id in "${ALL_USERS[@]}"; do
     echo ""
     echo "========== $andrew_id =========="
-    if ! "$0" "$andrew_id" ${CLEAN_ALL:+"$CLEAN_ALL"}; then
+    if ! "$0" "$andrew_id" "${EXTRA_FLAGS[@]}"; then
       echo "FAILED: $andrew_id" >&2
       failed=$((failed + 1))
     fi
@@ -55,25 +119,12 @@ PY
     echo "Finished with $failed failure(s) out of ${#ALL_USERS[@]}." >&2
     exit 1
   fi
-  echo "Finished regenerating ${#ALL_USERS[@]} user(s)."
+  if [[ "$STOP" -eq 1 ]]; then
+    echo "Finished stopping ${#ALL_USERS[@]} user container(s)."
+  else
+    echo "Finished regenerating ${#ALL_USERS[@]} user(s)."
+  fi
   exit 0
-fi
-
-USERNAME=$1
-CLEAN=$2
-
-if [[ -z "$USERNAME" ]]; then
-  usage
-fi
-
-# Back-compat: old calls were <andrew-id> <port> [clean]
-if [[ "$CLEAN" =~ ^[0-9]+$ ]]; then
-  echo "Warning: port argument is no longer used; containers are reached only via the gateway." >&2
-  CLEAN=$3
-fi
-
-if [[ -n "$CLEAN" && "$CLEAN" != "clean" ]]; then
-  usage
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -94,13 +145,21 @@ if [[ -n "$PUBLIC_BASE_DOMAIN" && ! "$USERNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-
   exit 1
 fi
 
+if [[ "$STOP" -eq 1 ]]; then
+  if docker rm -f "code-$USERNAME" >/dev/null 2>&1; then
+    echo "Stopped and removed container code-$USERNAME"
+  else
+    echo "No container code-$USERNAME to stop"
+  fi
+  exit 0
+fi
+
 docker network create "$NETWORK" 2>/dev/null || true
 
 # reset this user's container
 docker rm -f "code-$USERNAME" 2>/dev/null || true
 
-if [[ "$CLEAN" == "clean" ]]; then
-
+if [[ "$CLEAN" -eq 1 ]]; then
   # full reset: wipe the user's entire environment and code
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"

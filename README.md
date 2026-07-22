@@ -136,8 +136,8 @@ The gateway refuses to start if Google credentials are missing.
 ## Create per-user environment
 
 ```bash
-./create_codeserver.sh <ANDREW_ID> [clean]
-./create_codeserver.sh --all [clean]
+./create_codeserver.sh <ANDREW_ID> [--clean|--stop]
+./create_codeserver.sh --all [--clean|--stop]
 ```
 
 Use the student's Andrew ID as the username (e.g. `jsmith` for `jsmith@andrew.cmu.edu`).
@@ -145,10 +145,10 @@ This (re)creates their container with `auth: none` and registers them in
 `gateway/users.json` (the SSO allowlist). No host port is published — students reach the
 workspace only through the gateway on the Docker network.
 
-- Without `clean`, only the code-server config is reset; the user's home directory is kept.
-- With `clean`, the entire user environment is wiped and recreated from starter files.
-- `--all` regenerates every Andrew ID currently listed in `gateway/users.json`
-  (optional `clean` applies to each).
+- Without `--clean`, only the code-server config is reset; the user's home directory is kept.
+- With `--clean`, the entire user environment is wiped and recreated from starter files.
+- With `--stop`, the container is stopped and removed; the home directory is left alone.
+- `--all` applies the same action to every Andrew ID currently listed in `gateway/users.json`.
 - Containers use `--restart unless-stopped` and come back automatically after a host reboot.
 - Containers join `debug-server-net` so the gateway can proxy `https://<andrewid>.213-debug.com/`.
 - Session monitoring is enabled by default; logs go to `logs/<andrewid>-session-monitoring.jsonl`
@@ -162,9 +162,11 @@ Example:
 ```bash
 ./create_codeserver.sh jsmith
 ./create_codeserver.sh ada
-./create_codeserver.sh jsmith clean   # full reset for jsmith
-./create_codeserver.sh --all          # regenerate all enrolled users (keep homes)
-./create_codeserver.sh --all clean    # wipe and recreate every enrolled user
+./create_codeserver.sh jsmith --clean   # full reset for jsmith
+./create_codeserver.sh jsmith --stop    # stop and remove jsmith's container
+./create_codeserver.sh --all            # regenerate all enrolled users (keep homes)
+./create_codeserver.sh --all --clean    # wipe and recreate every enrolled user
+./create_codeserver.sh --all --stop     # stop every enrolled user's container
 ```
 
 ## Gateway login (Google SSO)
