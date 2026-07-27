@@ -30,6 +30,10 @@ WORKDIR /opt/code-server
 
 ARG CODE_SERVER_REF=main
 ARG VSCODE_COMMIT=a22d00300655c17490ce63dffc28bcdcedcd82c4
+# Embedded into asset URLs (/stable-<hash>/static/...), which Cloudflare and
+# browsers cache for a year. BUMP THIS to any new 40-char hex on every rebuild
+# that changes client code, or users keep getting the previously cached bundle.
+ARG ASSET_COMMIT=feab7abc580d8575981f0f0e6676fbaee4a83fc0
 
 COPY code-server/ ./
 
@@ -61,14 +65,18 @@ ENV PYTHON=/usr/bin/python3 \
     DISABLE_V8_COMPILE_CACHE=1 \
     SKIP_COPILOT=1 \
     MINIFY=true \
-    GOMEMLIMIT=1600MiB \
+    # Cap esbuild (Go) parallelism/heap: the minify step peaks at ~2.7GB with
+    # default GOMAXPROCS and gets OOM-killed on this 7GB host ("The service
+    # was stopped"). Slower, but keeps peak memory within reach.
+    GOMAXPROCS=2 \
+    GOMEMLIMIT=1024MiB \
     NODE_OPTIONS=--max-old-space-size=2048 \
     HOME=/home/coder \
     OS=linux \
     SHELL=/bin/bash \
     VERSION=0.0.0 \
     VSCODE_COMMIT=${VSCODE_COMMIT} \
-    BUILD_SOURCEVERSION=${VSCODE_COMMIT}
+    BUILD_SOURCEVERSION=${ASSET_COMMIT}
 
 # Single build step: install, compile, then delete sources and caches so this
 # layer only retains runtime artifacts (not multi-GB node_modules trees).
@@ -151,7 +159,7 @@ RUN ln -s . code-server \
     && npm ci --prefix lib/vscode \
     && npm run build:vscode \
     && bash -c 'source ./ci/lib.sh && rsync -a "lib/vscode-reh-web-${VSCODE_TARGET}/" lib/vscode/' \
-    && jq 'del(.defaultChatAgent) | del(.extensionsGallery) | .builtInExtensionsEnabledWithAutoUpdates = [] | .configurationDefaults = ((.configurationDefaults // {}) + {"chat.disableAIFeatures": true, "workbench.secondarySideBar.defaultVisibility": "hidden", "workbench.colorTheme": "Dark 2026", "extensions.allowed": {"*": false, "debug-server.auto-terminal": true}})' lib/vscode/product.json > lib/vscode/product.json.tmp \
+    && jq 'del(.extensionsGallery) | .builtInExtensionsEnabledWithAutoUpdates = [] | .configurationDefaults = ((.configurationDefaults // {}) + {"chat.disableAIFeatures": true, "workbench.secondarySideBar.defaultVisibility": "hidden", "workbench.colorTheme": "Dark 2026", "extensions.allowed": {"*": false, "debug-server.auto-terminal": true}})' lib/vscode/product.json > lib/vscode/product.json.tmp \
     && mv lib/vscode/product.json.tmp lib/vscode/product.json \
     && test -f lib/vscode/out/server-main.js \
     && npm run build \
@@ -178,16 +186,33 @@ FROM node:24-bookworm-slim
 
 USER root
 
+# bookworm-slim excludes man pages via dpkg path-exclude; drop that so man works.
+RUN sed -i '/^path-exclude \/usr\/share\/man/d' /etc/dpkg/dpkg.cfg.d/docker
+
 RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
  && apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=false \
     build-essential \
     ca-certificates \
     clang-format \
     gdb \
+    groff-base \
+    less \
     man-db \
+    manpages \
+    manpages-dev \
     valgrind \
     python3 \
     vim \
+ && apt-get install -y --reinstall --no-install-recommends -o APT::Keep-Downloaded-Packages=false \
+    bash \
+    coreutils \
+    debianutils \
+    findutils \
+    grep \
+    gzip \
+    sed \
+    tar \
+    util-linux \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /tmp/*
 
@@ -205,7 +230,9 @@ ENV HOME=/home/coder \
     OS=linux \
     SHELL=/bin/bash \
     VERSION=0.0.0 \
-    PYTHON=/usr/bin/python3
+    PYTHON=/usr/bin/python3 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
 
 WORKDIR /home/coder
 
