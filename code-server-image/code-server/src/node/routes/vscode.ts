@@ -204,8 +204,9 @@ router.get("/manifest.json", async (req, res) => {
           name: req.args["app-name"],
           short_name: req.args["app-name"],
           start_url: ".",
-          display: "fullscreen",
-          display_override: ["window-controls-overlay"],
+          // "browser" is not an installable display mode, so Chrome will not
+          // prompt students to install code-server as an app.
+          display: "browser",
           description: "Run Code on a remote server.",
           icons: [192, 512]
             .map((size) => [

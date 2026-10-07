@@ -91,6 +91,10 @@ main() {
   # them from the marketplace, and there's no reason to auto-trust their auth
   # access.
   #
+  # Keep defaultChatAgent in product.json. VS Code's onboarding contribution
+  # asserts it at workbench load time; deleting it causes a blank white screen
+  # even when chat.disableAIFeatures is true and Chat UI is force-hidden.
+  #
   # This needs to be done before building as Code will read this file and embed
   # it into the client-side code.
   cp product.json product.original.json # Since jq has no inline edit.
@@ -137,7 +141,7 @@ main() {
     }
   }
 EOF
-  ) | jq 'del(.defaultChatAgent) | .builtInExtensionsEnabledWithAutoUpdates = []' > product.json
+  ) | jq '.builtInExtensionsEnabledWithAutoUpdates = []' > product.json
 
   if [[ ! ${SKIP_COPILOT-} ]]; then
     VSCODE_QUALITY=stable npm run gulp compile-copilot-extension-full-build

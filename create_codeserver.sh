@@ -333,6 +333,7 @@ if ! docker run -d \
   --restart unless-stopped \
   -e CODE_SERVER_USERNAME="$USERNAME" \
   -e NODE_OPTIONS="--max-old-space-size=256" \
+  -e CODE_SERVER_RECONNECTION_GRACE_TIME=300 \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
   -e CODE_SERVER_DISABLE_CLIPBOARD=1 \

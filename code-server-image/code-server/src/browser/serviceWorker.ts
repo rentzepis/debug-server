@@ -7,6 +7,4 @@ self.addEventListener("activate", (event: any) => {
   console.debug("[Service Worker] activated")
 })
 
-self.addEventListener("fetch", () => {
-  // Without this event handler we won't be recognized as a PWA.
-})
+// No fetch handler: Chrome requires one to treat the site as an installable PWA.

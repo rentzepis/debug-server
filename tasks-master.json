@@ -7,9 +7,9 @@
             "command": ":",
             "problemMatcher": [],
             "presentation": {
-                "reveal": "always",
+                "reveal": "never",
                 "panel": "dedicated",
-                "focus": true,
+                "focus": false,
                 "echo": false,
                 "showReuseMessage": false
             },

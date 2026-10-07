@@ -197,6 +197,7 @@ RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false upd
     gdb \
     groff-base \
     less \
+    telnet \
     man-db \
     manpages \
     manpages-dev \
