@@ -1,4 +1,4 @@
-# Debug Server
+  # Debug Server
 
 ## About
 
@@ -122,21 +122,23 @@ Required: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. File is gitignored. Gatewa
 ```bash
 ./create_codeserver.sh <username> [--clean|--stop]
 ./create_codeserver.sh --all [--clean|--stop]
+./create_codeserver.sh --student-code [--clean|--stop]
 ```
 
 
-| Flag        | Effect                                                                             |
-| ----------- | ---------------------------------------------------------------------------------- |
-| *(default)* | Recreate container; keep home; reset code-server config/workspace                  |
-| `--clean`   | Delete home + session log; recreate from `starter/` (+ `student-code/` if present) |
-| `--stop`    | Remove container; keep home                                                        |
-| `--all`     | Apply to every username in `gateway/users.json`                                    |
+| Flag             | Effect                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| *(default)*      | Recreate container; keep home; reset code-server config/workspace                  |
+| `--clean`        | Delete home + session log; recreate from `starter/` (+ `student-code/` if present) |
+| `--stop`         | Remove container; keep home                                                        |
+| `--all`          | Apply to every username in `gateway/users.json`                                    |
+| `--student-code` | Apply to every Andrew ID with a `.c` file in `student-code/`                       |
 
 
 **Default Configuration:**
 
 - Network: `debug-server-net` (no published ports)
-- Limits: 768 MB RAM, 1 CPU
+- Limits: 512 MB RAM, 1 CPU
 - Restart: `unless-stopped`
 - Session monitoring and clipboard restrictions enabled
 - Auto-open bash terminal in an editor tab

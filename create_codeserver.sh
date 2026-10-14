@@ -4,17 +4,21 @@
 usage() {
   echo "Usage: $0 <andrew-id> [--clean|--stop]" >&2
   echo "       $0 --all [--clean|--stop]" >&2
+  echo "       $0 --student-code [--clean|--stop]" >&2
   echo "  <andrew-id> must match the student's @andrew.cmu.edu Google account local-part." >&2
-  echo "  --all     apply the action to every enrolled user in gateway/users.json." >&2
-  echo "  --clean   wipe the user's home and recreate the container from starter files." >&2
-  echo "  --stop    stop and remove the container (home directory is left alone)." >&2
+  echo "  --all           apply the action to every enrolled user in gateway/users.json." >&2
+  echo "  --student-code  apply the action to every Andrew ID with a .c file in student-code/." >&2
+  echo "  --clean         wipe the user's home and recreate the container from starter files." >&2
+  echo "  --stop          stop and remove the container (home directory is left alone)." >&2
   exit 1
 }
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
+STUDENT_CODE_DIR="$SCRIPT_DIR/student-code"
 
 DO_ALL=0
+DO_STUDENT_CODE=0
 CLEAN=0
 STOP=0
 USERNAME=""
@@ -23,6 +27,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --all|-a)
       DO_ALL=1
+      ;;
+    --student-code)
+      DO_STUDENT_CODE=1
       ;;
     --clean|-c|clean)
       CLEAN=1
@@ -59,12 +66,18 @@ if [[ "$CLEAN" -eq 1 && "$STOP" -eq 1 ]]; then
   usage
 fi
 
-if [[ "$DO_ALL" -eq 1 && -n "$USERNAME" ]]; then
-  echo "Use either --all or <andrew-id>, not both." >&2
+bulk_modes=$((DO_ALL + DO_STUDENT_CODE))
+if [[ "$bulk_modes" -gt 1 ]]; then
+  echo "Use either --all or --student-code, not both." >&2
   usage
 fi
 
-if [[ "$DO_ALL" -eq 0 && -z "$USERNAME" ]]; then
+if [[ "$bulk_modes" -eq 1 && -n "$USERNAME" ]]; then
+  echo "Use either a bulk flag (--all/--student-code) or <andrew-id>, not both." >&2
+  usage
+fi
+
+if [[ "$bulk_modes" -eq 0 && -z "$USERNAME" ]]; then
   usage
 fi
 
@@ -84,26 +97,42 @@ for key, value in sorted(users.items(), key=lambda item: item[0].lower()):
 PY
 }
 
-# Apply the same action to every enrolled Andrew ID from gateway/users.json
-if [[ "$DO_ALL" -eq 1 ]]; then
-  if [[ ! -s "$USERS_FILE" ]]; then
-    echo "No enrolled users found in $USERS_FILE" >&2
-    exit 1
-  fi
-  mapfile -t ALL_USERS < <(enrolled_users)
+student_code_users() {
+  python3 - "$STUDENT_CODE_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+if not root.is_dir():
+    sys.exit(0)
+ids = sorted(
+    {p.stem for p in root.glob("*.c") if p.is_file()},
+    key=str.lower,
+)
+for andrew_id in ids:
+    print(andrew_id)
+PY
+}
+
+run_bulk() {
+  local source_label=$1
+  shift
+  local -a ALL_USERS=("$@")
+
   if [[ ${#ALL_USERS[@]} -eq 0 ]]; then
-    echo "No enrolled users found in $USERS_FILE" >&2
+    echo "No users found from $source_label" >&2
     exit 1
   fi
+
   EXTRA_FLAGS=()
   if [[ "$STOP" -eq 1 ]]; then
     EXTRA_FLAGS+=(--stop)
-    echo "Stopping ${#ALL_USERS[@]} user container(s) from $USERS_FILE..."
+    echo "Stopping ${#ALL_USERS[@]} user container(s) from $source_label..."
   elif [[ "$CLEAN" -eq 1 ]]; then
     EXTRA_FLAGS+=(--clean)
-    echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE (clean)..."
+    echo "Regenerating ${#ALL_USERS[@]} user(s) from $source_label (clean)..."
   else
-    echo "Regenerating ${#ALL_USERS[@]} user(s) from $USERS_FILE..."
+    echo "Regenerating ${#ALL_USERS[@]} user(s) from $source_label..."
   fi
   failed=0
   for andrew_id in "${ALL_USERS[@]}"; do
@@ -125,6 +154,26 @@ if [[ "$DO_ALL" -eq 1 ]]; then
     echo "Finished regenerating ${#ALL_USERS[@]} user(s)."
   fi
   exit 0
+}
+
+# Apply the same action to every enrolled Andrew ID from gateway/users.json
+if [[ "$DO_ALL" -eq 1 ]]; then
+  if [[ ! -s "$USERS_FILE" ]]; then
+    echo "No enrolled users found in $USERS_FILE" >&2
+    exit 1
+  fi
+  mapfile -t ALL_USERS < <(enrolled_users)
+  run_bulk "$USERS_FILE" "${ALL_USERS[@]}"
+fi
+
+# Apply the same action to every Andrew ID that has a .c file in student-code/
+if [[ "$DO_STUDENT_CODE" -eq 1 ]]; then
+  if [[ ! -d "$STUDENT_CODE_DIR" ]]; then
+    echo "No student-code directory at $STUDENT_CODE_DIR" >&2
+    exit 1
+  fi
+  mapfile -t ALL_USERS < <(student_code_users)
+  run_bulk "$STUDENT_CODE_DIR" "${ALL_USERS[@]}"
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
@@ -178,7 +227,7 @@ chown -R 1000:1000 "$LOG_DIR"
 # copy starter files
 cp -r starter/proxylab-handout/. "$HOME_DIR/"
 
-STUDENT_CODE="$SCRIPT_DIR/student-code/$USERNAME.c"
+STUDENT_CODE="$STUDENT_CODE_DIR/$USERNAME.c"
 if [[ -f "$STUDENT_CODE" ]]; then
   cp "$STUDENT_CODE" "$HOME_DIR/proxy.c"
 else
@@ -277,13 +326,14 @@ PY
 if ! docker run -d \
   --name "code-$USERNAME" \
   --network "$NETWORK" \
-  --memory=768m \
-  --memory-swap=768m \
+  --memory=512m \
+  --memory-swap=512m \
   --cpus=1.0 \
   --security-opt=no-new-privileges:true \
   --restart unless-stopped \
   -e CODE_SERVER_USERNAME="$USERNAME" \
-  -e NODE_OPTIONS="--max-old-space-size=384" \
+  -e NODE_OPTIONS="--max-old-space-size=256" \
+  -e CODE_SERVER_RECONNECTION_GRACE_TIME=300 \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
   -e CODE_SERVER_DISABLE_CLIPBOARD=1 \

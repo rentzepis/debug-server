@@ -1,6 +1,6 @@
 import { logger } from "@coder/logger";
 import { randomUUID } from "crypto";
-import { Router, type Request, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { type HttpCode, HttpError } from "../../common/http";
@@ -158,6 +158,7 @@ const getSessionId = (req: Request): string | undefined => {
 
 class SessionMonitoringSink {
   private writeQueue: Promise<void> = Promise.resolve();
+  private recentKeys = new Map<string, number>();
 
   public constructor(
     private readonly args: DefaultedArgs,
@@ -177,6 +178,25 @@ class SessionMonitoringSink {
     return getCookieOptions(req);
   }
 
+  private shouldDedupe(event: NormalizedSessionEvent): boolean {
+    // Disconnect may arrive twice (fetch keepalive + text/plain beacon).
+    if (event.event !== "disconnect") {
+      return false;
+    }
+    const key = `${event.sessionId || ""}:${event.event}:${event.reason || ""}:${event.remoteAddress || ""}`;
+    const now = Date.now();
+    const prev = this.recentKeys.get(key);
+    this.recentKeys.set(key, now);
+    if (this.recentKeys.size > 200) {
+      for (const [k, ts] of this.recentKeys) {
+        if (now - ts > 5000) {
+          this.recentKeys.delete(k);
+        }
+      }
+    }
+    return typeof prev === "number" && now - prev < 2000;
+  }
+
   public record(req: Request, event: SessionEvent): void {
     if (!this.enabled) {
       return;
@@ -185,7 +205,7 @@ class SessionMonitoringSink {
     const sessionId = event.sessionId || getSessionId(req);
     const remoteAddress =
       event.remoteAddress || req.connection.remoteAddress || undefined;
-    const line = `${formatSessionLogLine({
+    const normalized: NormalizedSessionEvent = {
       event: event.event,
       timestamp: event.timestamp,
       sessionId,
@@ -194,7 +214,11 @@ class SessionMonitoringSink {
       active: event.active,
       reason: event.reason,
       remoteAddress,
-    })}\n`;
+    };
+    if (this.shouldDedupe(normalized)) {
+      return;
+    }
+    const line = `${formatSessionLogLine(normalized)}\n`;
 
     this.writeQueue = this.writeQueue
       .then(async () => {
@@ -225,11 +249,25 @@ class SessionMonitoringSink {
       return "";
     }
 
-    const endpoint = replaceTemplates(req, "{{BASE}}/session/event");
+    // Do NOT bake replaceTemplates({{BASE}}) from the /session/monitor.js request:
+    // that BASE is "./.." and resolves incorrectly as a page-relative fallback.
     return `(() => {
-  const endpoint = new URL(${JSON.stringify(endpoint)}, window.location.href).href;
+  // Avoid duplicate listeners if the workbench HTML somehow loads this twice.
+  if (window.__codeServerSessionMonitor) {
+    return;
+  }
+  window.__codeServerSessionMonitor = true;
+
+  // Derive the event endpoint from this script URL (…/session/monitor.js → …/session/event).
+  // Fall back to a path relative to the workbench page origin.
+  const scriptSrc = (document.currentScript && document.currentScript.src)
+    || Array.prototype.map.call(document.scripts, (s) => s.src).find((src) => /\\/session\\/monitor\\.js(\\?|$)/.test(src));
+  const endpoint = scriptSrc
+    ? scriptSrc.replace(/monitor\\.js(\\?.*)?$/, "event")
+    : new URL("session/event", window.location.href).href;
   let lastVisibility;
   let lastFocused;
+  let unloading = false;
 
   const currentState = () => ({
     visibility: document.hidden ? "hidden" : "visible",
@@ -237,6 +275,11 @@ class SessionMonitoringSink {
   });
 
   const send = (event, extras = {}) => {
+    // Once unload starts, only DISCONNECT matters — competing keepalive POSTs
+    // from blur/visibility can crowd out the disconnect delivery.
+    if (unloading && event !== "disconnect") {
+      return;
+    }
     const state = currentState();
     const payload = JSON.stringify({
       event,
@@ -248,6 +291,9 @@ class SessionMonitoringSink {
       ...extras,
     });
 
+    // Normal events: fetch (proven reliable through the gateway). Do not prefer
+    // sendBeacon with application/json — browsers may accept/queue the beacon
+    // and then drop it, skipping our fetch fallback entirely.
     fetch(endpoint, {
       body: payload,
       credentials: "include",
@@ -255,15 +301,30 @@ class SessionMonitoringSink {
       keepalive: true,
       method: "POST",
     }).catch(() => {
+      // text/plain is CORS-safelisted for sendBeacon; server parses JSON text.
       try {
         navigator.sendBeacon(
           endpoint,
-          new Blob([payload], { type: "application/json" }),
+          new Blob([payload], { type: "text/plain;charset=UTF-8" }),
         );
       } catch (e) {
         // Ignore unload-time failures.
       }
     });
+
+    // Unload: also queue a safelisted beacon. fetch+keepalive usually works, but
+    // during tab close the promise often never settles so the .catch above may
+    // not run — fire beacon unconditionally as a second path.
+    if (event === "disconnect") {
+      try {
+        navigator.sendBeacon(
+          endpoint,
+          new Blob([payload], { type: "text/plain;charset=UTF-8" }),
+        );
+      } catch (e) {
+        // Ignore.
+      }
+    }
   };
 
   const emitVisibility = () => {
@@ -287,19 +348,27 @@ class SessionMonitoringSink {
   document.addEventListener("visibilitychange", emitVisibility, { passive: true });
   window.addEventListener("focus", emitFocus, { passive: true });
   window.addEventListener("blur", emitFocus, { passive: true });
-  window.addEventListener("pagehide", () => send("disconnect", { reason: "pagehide" }), { passive: true });
-
-  const bootstrap = () => {
+  window.addEventListener("pagehide", (e) => {
+    // persisting into bfcache is not a real session end.
+    if (e.persisted) {
+      return;
+    }
+    unloading = true;
+    send("disconnect", { reason: "pagehide" });
+  }, { passive: true });
+  window.addEventListener("pageshow", (e) => {
+    if (!e.persisted) {
+      return;
+    }
+    unloading = false;
+    lastVisibility = undefined;
+    lastFocused = undefined;
     emitVisibility();
     emitFocus();
-  };
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", bootstrap, { once: true });
-  } else if (typeof requestIdleCallback === "function") {
-    requestIdleCallback(bootstrap);
-  } else {
-    setTimeout(bootstrap, 0);
-  }
+  }, { passive: true });
+
+  emitVisibility();
+  emitFocus();
 })();`;
   }
 }
@@ -568,7 +637,8 @@ export const router = Router();
 router.get("/monitor.js", (req, res) => {
   const sink = getSessionMonitoringSink(req.args);
   res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  // Must not be cached: unload/beacon logic changes need to reach browsers immediately.
+  res.setHeader("Cache-Control", "no-store");
   if (!sink.enabled) {
     res.status(204).end();
     return;
@@ -602,7 +672,11 @@ router.get("/hide-agent-sidebar.js", (req, res) => {
   res.end(buildAgentSidebarHideScript());
 });
 
-router.post("/event", async (req, res) => {
+router.post(
+  "/event",
+  // Allow sendBeacon text/plain backups (CORS-safelisted) in addition to JSON.
+  express.text({ type: "text/plain", limit: "32kb" }),
+  async (req, res) => {
   const sink = getSessionMonitoringSink(req.args);
   if (!(await canRecordSessionEvent(req))) {
     throw new HttpError("Unauthorized", 401 as HttpCode);

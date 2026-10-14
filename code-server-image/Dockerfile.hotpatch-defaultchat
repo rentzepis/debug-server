@@ -1,0 +1,9 @@
+# Hotfix: restore defaultChatAgent required by VS Code onboarding.
+# Without it, workbench.js throws at load and the browser shows a blank white screen.
+FROM code-server-image
+
+USER root
+COPY hotpatch-defaultchat.py /tmp/hotpatch-defaultchat.py
+RUN python3 /tmp/hotpatch-defaultchat.py && rm /tmp/hotpatch-defaultchat.py
+
+USER coder
