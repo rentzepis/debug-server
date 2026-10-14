@@ -10,6 +10,7 @@ STAFF_FILE="$SCRIPT_DIR/gateway/staff.json"
 DATA_DIR="$SCRIPT_DIR/gateway/data"
 LOG_DIR="$SCRIPT_DIR/logs"
 SNAPSHOTS_DIR="$SCRIPT_DIR/snapshots"
+KEYSTROKE_DIR="$SCRIPT_DIR/keystrokes"
 SECRET_FILE="$SCRIPT_DIR/gateway/.session_secret"
 CHECKIN_SECRET_FILE="$SCRIPT_DIR/gateway/.checkin_secret"
 ENV_FILE="$SCRIPT_DIR/gateway/.env"
@@ -62,6 +63,9 @@ mkdir -p "$DATA_DIR" "$LOG_DIR"
 # Work snapshots hold student code: readable by root only.
 mkdir -p "$SNAPSHOTS_DIR"
 chmod 700 "$SNAPSHOTS_DIR"
+# Terminal keystroke logs, one folder per student (create_codeserver.sh).
+mkdir -p "$KEYSTROKE_DIR"
+chmod 700 "$KEYSTROKE_DIR"
 
 if [[ ! -f "$SECRET_FILE" ]]; then
   openssl rand -hex 32 > "$SECRET_FILE"
@@ -87,6 +91,7 @@ DOCKER_ENV=(
   -e CHECKIN_QR_SECRET="$CHECKIN_QR_SECRET"
   -e SESSION_LOG_DIR=/data/logs
   -e SNAPSHOTS_DIR=/data/snapshots
+  -e KEYSTROKE_LOG_DIR=/data/keystrokes
 )
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
@@ -106,6 +111,7 @@ docker run -d \
   -v "$DATA_DIR:/data/state" \
   -v "$LOG_DIR:/data/logs:ro" \
   -v "$SNAPSHOTS_DIR:/data/snapshots:ro" \
+  -v "$KEYSTROKE_DIR:/data/keystrokes:ro" \
   "${IMAGE}"
 
 # Starts each student's container while they are checked in and stops it once

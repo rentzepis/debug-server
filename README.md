@@ -14,7 +14,7 @@ Design constraints:
 | Isolation  | One container per user; no published host ports; memory/CPU limits; no privilege escalation  |
 | Auth       | Google SSO only; code-server `auth: none`; enrollment via `gateway/users.json`               |
 | Integrity  | Clipboard disabled by default; AI chat / Copilot and third-party extensions blocked          |
-| Monitoring | Per-user browser focus / tab / login logs under `logs/`                                      |
+| Monitoring | Per-user browser focus / tab / login logs under `logs/`; terminal keystrokes under `keystrokes/` |
 | Check-in   | Workspaces locked until staff check the student in to the active assignment (QR / passcode)  |
 | Ops        | Provision, reset, or stop containers with `create_codeserver.sh`; `--restart unless-stopped` |
 
@@ -45,6 +45,7 @@ code-<username>  (auth: none, no host ports)
 | `student-code/<username>.c`                | Optional seed for `proxy.c`                                 |
 | `logs/<username>-session-monitoring.jsonl` | Session activity log                                        |
 | `snapshots/<assignment>/<username>/`       | Archives of student work taken at submit / time-up          |
+| `keystrokes/<username>/`                   | Terminal keystroke logs (`script` input + timing per terminal) |
 
 
 ## Requirements
@@ -134,7 +135,7 @@ Required: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. File is gitignored. Gatewa
 | Flag             | Effect                                                                             |
 | ---------------- | ---------------------------------------------------------------------------------- |
 | *(default)*      | Recreate container; keep home; reset code-server config/workspace                  |
-| `--clean`        | Delete home + session log; recreate from `starter/` (+ `student-code/` if present) |
+| `--clean`        | Delete home, session log and keystroke logs; recreate from `starter/` (+ `student-code/` if present) |
 | `--stop`         | Remove container; keep home                                                        |
 | `--all`          | Apply to every username in `gateway/users.json`                                    |
 | `--student-code` | Apply to every Andrew ID with a `.c` file in `student-code/`                       |
@@ -226,6 +227,20 @@ tail -f logs/jsmith-session-monitoring.jsonl
 | `TAB HIDDEN` / `TAB VISIBLE` | Browser tab visibility        |
 | `DISCONNECT`                 | Page close or navigation away |
 
+
+### Terminal keystrokes
+
+Every interactive terminal a student opens runs under `script(1)`, started from `student-bash.bashrc`. It records the bytes typed into the terminal (not its output) with timings, including input to programs like `gdb` or `vim`. Logs go to `keystrokes/<username>/<start>-<pid>.{in,timing}`. Each container mounts only its own folder, at `/var/log/keystrokes`. The `keystrokes/` folder is root-only (mode 700), and the gateway mounts it read-only.
+
+On the instructor dashboard, click an Andrew ID to see **Terminal input** under the browser timeline. It shows each typed line since check-in, replayed through basic line editing (Backspace, arrows, Ctrl+A/E/U/K/W). When editing keys were involved, the raw keys are shown next to the line. Lines marked **≈** used Tab completion, history or a full-screen program, so the command that actually ran may differ. Ctrl+C and Ctrl+D are shown where they ended a line.
+
+Turning it on needs no image rebuild: re-run `./start-gateway.sh` and `./create_codeserver.sh --all` so containers pick up the new mount.
+
+Limitations:
+
+- Only terminals are covered; typing in the editor is not logged.
+- Completed text from Tab or history is not in the input, only the key that triggered it.
+- The student owns the process and their log folder, so a determined student can remove their logs, or set a VS Code terminal profile that skips `/etc/bash.bashrc` (e.g. `bash --norc`). An empty log for an active student is itself a signal.
 
 ### Check-in
 

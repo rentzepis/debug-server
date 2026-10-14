@@ -177,6 +177,7 @@ if [[ "$DO_STUDENT_CODE" -eq 1 ]]; then
 fi
 
 LOG_DIR="$SCRIPT_DIR/logs"
+KEYSTROKE_DIR="$SCRIPT_DIR/keystrokes"
 DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
 NETWORK="debug-server-net"
 HOME_DIR="/home/$USERNAME"
@@ -213,6 +214,7 @@ if [[ "$CLEAN" -eq 1 ]]; then
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"
   rm -f "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
+  rm -rf "${KEYSTROKE_DIR:?}/$USERNAME"
 else
   # keep the rest of the user's environment intact, only reset the code-server config/workspace
   rm -rf "$HOME_DIR/.local/share/code-server"
@@ -223,6 +225,12 @@ fi
 mkdir -p "$LOG_DIR"
 touch "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
 chown -R 1000:1000 "$LOG_DIR"
+
+# Terminal keystrokes hold student work: the parent is root-only and each
+# container mounts just its own folder.
+mkdir -p "$KEYSTROKE_DIR/$USERNAME"
+chmod 700 "$KEYSTROKE_DIR"
+chown 1000:1000 "$KEYSTROKE_DIR/$USERNAME"
 
 # copy starter files
 cp -r starter/proxylab-handout/. "$HOME_DIR/"
@@ -359,12 +367,14 @@ if ! docker create \
   -e CODE_SERVER_RECONNECTION_GRACE_TIME=300 \
   -e CODE_SERVER_SESSION_MONITORING=1 \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
+  -e CODE_SERVER_KEYSTROKE_LOG_DIR=/var/log/keystrokes \
   -e CODE_SERVER_DISABLE_CLIPBOARD=1 \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -e BASH_ENV=/etc/bash.bashrc \
   -v "$SCRIPT_DIR/student-bash.bashrc":/etc/bash.bashrc:ro \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
+  -v "$KEYSTROKE_DIR/$USERNAME":/var/log/keystrokes \
   code-server-image \
   node /opt/code-server/out/node/entry.js --bind-addr 0.0.0.0:8080 --auth none; then
   echo "Failed to create container for $USERNAME" >&2

@@ -8,6 +8,7 @@ const { createCheckinStore } = require("./checkin/store");
 const { createCheckinTokenService } = require("./checkin/tokenService");
 const { registerCheckinRoutes } = require("./checkin/routes");
 const { createSessionLogReader } = require("./monitoring/sessionLog");
+const { createKeystrokeLogReader } = require("./monitoring/keystrokeLog");
 
 const PORT = Number(process.env.PORT || 8080);
 const USERS_FILE = process.env.USERS_FILE || "/data/users.json";
@@ -16,6 +17,7 @@ const CHECKIN_STATE_FILE = process.env.CHECKIN_STATE_FILE || "/data/state/checki
 const CHECKIN_QR_SECRET = process.env.CHECKIN_QR_SECRET || "";
 const SESSION_LOG_DIR = process.env.SESSION_LOG_DIR || "";
 const SNAPSHOTS_DIR = process.env.SNAPSHOTS_DIR || "";
+const KEYSTROKE_LOG_DIR = process.env.KEYSTROKE_LOG_DIR || "";
 // Deadlines can move (extensions, edited time limits), so expiry is enforced
 // by sweeping open editors rather than by a timer fixed at connect time.
 const LOCK_SWEEP_MS = 1000;
@@ -766,6 +768,7 @@ registerCheckinRoutes(app, {
   escapeHtml,
   onLocksChanged: revokeLockedWorkspaceSockets,
   sessionLogs: createSessionLogReader({ dir: SESSION_LOG_DIR }),
+  keystrokeLogs: createKeystrokeLogReader({ dir: KEYSTROKE_LOG_DIR }),
   snapshotsDir: SNAPSHOTS_DIR,
 });
 

@@ -346,6 +346,24 @@ tr.timeline-row .hint { font-size: 0.875rem; margin: 0 0 8px; }
 .timeline-time { font-variant-numeric: tabular-nums; min-width: 7.5em; opacity: 0.7; }
 .timeline-label { font-weight: 600; min-width: 7.5em; }
 .timeline-label.away { color: var(--dash-amber); }
+.timeline-heading { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.04em; margin: 0 0 6px; opacity: 0.7; text-transform: uppercase; }
+.timeline + .timeline-heading, .hint + .timeline-heading { margin-top: 14px; }
+
+.keylog { margin-bottom: 10px; }
+.keylog li { align-items: baseline; flex-wrap: wrap; }
+.keylog-text { font-weight: 600; white-space: pre-wrap; word-break: break-all; }
+.keylog-text:empty::after { content: "(empty)"; font-weight: 400; opacity: 0.5; }
+.keylog-text.inexact::before { color: var(--dash-amber); content: "≈ "; }
+.keylog-raw { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0.6; white-space: pre-wrap; word-break: break-all; }
+.keylog kbd {
+  background: var(--dash-gray-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  margin: 0 1px;
+  padding: 0 4px;
+}
 
 #activity-note { font-size: 0.85rem; margin-top: 12px; }
 

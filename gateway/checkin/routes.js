@@ -11,6 +11,8 @@ const { listSnapshots, snapshotPath } = require("../snapshots/snapshots");
 const PASSCODE_FAILURE_WINDOW_MS = 60_000;
 const PASSCODE_MAX_FAILURES = 5;
 const NO_ACTIVE_POLL_MS = 3_000;
+// Typed lines sent per student; long sessions keep the most recent.
+const MAX_KEYSTROKE_LINES = 2_000;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -48,6 +50,7 @@ function registerCheckinRoutes(app, deps) {
     escapeHtml,
     onLocksChanged,
     sessionLogs,
+    keystrokeLogs,
     snapshotsDir,
   } = deps;
 
@@ -436,10 +439,36 @@ function registerCheckinRoutes(app, deps) {
         .events(req.params.user)
         .filter((event) => event.at >= window.from && event.at <= window.to)
         .map((event) => ({ at: new Date(event.at).toISOString(), label: event.label, detail: event.detail }));
+      const terminals = [];
+      let budget = MAX_KEYSTROKE_LINES;
+      let truncated = false;
+      for (const session of keystrokeLogs.sessions(req.params.user).reverse()) {
+        const inWindow = session.lines.filter((line) => line.at >= window.from && line.at <= window.to);
+        if (!inWindow.length) {
+          continue;
+        }
+        if (inWindow.length > budget) {
+          truncated = true;
+          if (!budget) {
+            break;
+          }
+        }
+        const lines = inWindow.slice(-budget);
+        budget -= lines.length;
+        terminals.unshift({
+          id: session.id,
+          startedAt: new Date(session.startedAt).toISOString(),
+          endedAt: session.endedAt === null ? null : new Date(session.endedAt).toISOString(),
+          lines: lines.map((line) => ({ ...line, at: new Date(line.at).toISOString() })),
+        });
+      }
       return res.json({
         from: new Date(window.from).toISOString(),
         to: new Date(window.to).toISOString(),
         events,
+        keystrokesAvailable: keystrokeLogs.available(),
+        terminals,
+        terminalsTruncated: truncated,
       });
     }),
   );
