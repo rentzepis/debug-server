@@ -43,7 +43,7 @@ code-<username>  (auth: none, no host ports)
 | `start-gateway.sh`                         | Build and run the gateway                                   |
 | `starter/`                                 | Handout files copied into student homes                     |
 | `student-code/<username>.c`                | Optional seed for `proxy.c`                                 |
-| `logs/<username>-session-monitoring.jsonl` | Session activity log                                        |
+| `logs/<username>/session-monitoring.jsonl` | Session activity log                                        |
 | `snapshots/<assignment>/<username>/`       | Archives of student work taken at submit / time-up          |
 | `keystrokes/<username>/`                   | Terminal keystroke logs (`script` input + timing per terminal) |
 
@@ -213,10 +213,10 @@ Student URL: `http://<SERVER_IP>/`. Prefer Cloudflare for Google OAuth redirect 
 
 ### Session monitoring
 
-Log path: `logs/<username>-session-monitoring.jsonl` (enabled by `create_codeserver.sh`). Tracks browser window/tab events, not VS Code editor tabs.
+Log path: `logs/<username>/session-monitoring.jsonl` (enabled by `create_codeserver.sh`). Tracks browser window/tab events, not VS Code editor tabs. Each container mounts only its own folder, at `/var/log/code-server`, so students cannot see or edit each other's logs; the gateway mounts `logs/` read-only. `create_codeserver.sh` moves a log from the old flat layout (`logs/<username>-session-monitoring.jsonl`) into the user's folder; re-run `./create_codeserver.sh --all` after upgrading so containers pick up the new mount.
 
 ```bash
-tail -f logs/jsmith-session-monitoring.jsonl
+tail -f logs/jsmith/session-monitoring.jsonl
 ```
 
 

@@ -74,7 +74,8 @@ test("reader caches by file stat and rejects unsafe usernames", () => {
   const reader = createSessionLogReader({ dir });
   assert.equal(reader.available(), true);
   assert.deepEqual(reader.events("alice"), []);
-  fs.writeFileSync(path.join(dir, "alice-session-monitoring.jsonl"), LOG);
+  fs.mkdirSync(path.join(dir, "alice"));
+  fs.writeFileSync(path.join(dir, "alice", "session-monitoring.jsonl"), LOG);
   assert.equal(reader.events("alice").length, 11);
   assert.equal(reader.events("alice"), reader.events("alice"));
   assert.deepEqual(reader.events("../alice"), []);

@@ -213,6 +213,7 @@ if [[ "$CLEAN" -eq 1 ]]; then
   # full reset: wipe the user's entire environment and code
   echo "Resetting entire environment for $USERNAME..."
   rm -rf "$HOME_DIR"
+  rm -rf "${LOG_DIR:?}/$USERNAME"
   rm -f "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
   rm -rf "${KEYSTROKE_DIR:?}/$USERNAME"
 else
@@ -222,9 +223,17 @@ else
   rm -f "$HOME_DIR/.config/code-server/config.yaml"
 fi
 
-mkdir -p "$LOG_DIR"
-touch "$LOG_DIR/$USERNAME-session-monitoring.jsonl"
-chown -R 1000:1000 "$LOG_DIR"
+# Session logs: each container mounts just its own folder, so students cannot
+# read or rewrite each other's browser-activity logs.
+mkdir -p "$LOG_DIR/$USERNAME"
+chown root:root "$LOG_DIR"
+chmod 755 "$LOG_DIR"
+# Move a log from the old flat layout (logs/<user>-session-monitoring.jsonl).
+if [[ -f "$LOG_DIR/$USERNAME-session-monitoring.jsonl" && ! -e "$LOG_DIR/$USERNAME/session-monitoring.jsonl" ]]; then
+  mv "$LOG_DIR/$USERNAME-session-monitoring.jsonl" "$LOG_DIR/$USERNAME/session-monitoring.jsonl"
+fi
+touch "$LOG_DIR/$USERNAME/session-monitoring.jsonl"
+chown -R 1000:1000 "$LOG_DIR/$USERNAME"
 
 # Terminal keystrokes hold student work: the parent is root-only and each
 # container mounts just its own folder.
@@ -366,14 +375,14 @@ if ! docker create \
   -e NODE_OPTIONS="--max-old-space-size=256" \
   -e CODE_SERVER_RECONNECTION_GRACE_TIME=300 \
   -e CODE_SERVER_SESSION_MONITORING=1 \
-  -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
+  -e CODE_SERVER_SESSION_MONITORING_FILE=/var/log/code-server/session-monitoring.jsonl \
   -e CODE_SERVER_KEYSTROKE_LOG_DIR=/var/log/keystrokes \
   -e CODE_SERVER_DISABLE_CLIPBOARD=1 \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
   -e BASH_ENV=/etc/bash.bashrc \
   -v "$SCRIPT_DIR/student-bash.bashrc":/etc/bash.bashrc:ro \
   -v "$HOME_DIR":/home/coder \
-  -v "$LOG_DIR":/var/log/code-server \
+  -v "$LOG_DIR/$USERNAME":/var/log/code-server \
   -v "$KEYSTROKE_DIR/$USERNAME":/var/log/keystrokes \
   code-server-image \
   node /opt/code-server/out/node/entry.js --bind-addr 0.0.0.0:8080 --auth none; then
