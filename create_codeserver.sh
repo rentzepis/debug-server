@@ -260,6 +260,25 @@ cat > "$CODE_SERVER_USER_DIR/settings.json" <<'EOF'
   "remote.otherPortsAttributes": {
     "onAutoForward": "silent"
   },
+  "git.enabled": false,
+  "git.autoRepositoryDetection": false,
+  "extensions.autoCheckUpdates": false,
+  "extensions.autoUpdate": false,
+  "update.mode": "none",
+  "telemetry.telemetryLevel": "off",
+  "typescript.tsserver.enable": false,
+  "typescript.validate.enable": false,
+  "javascript.validate.enable": false,
+  "search.followSymlinks": false,
+  "files.watcherExclude": {
+    "**/.local/**": true,
+    "**/.config/**": true,
+    "**/.cache/**": true,
+    "**/*.o": true,
+    "**/*.so": true,
+    "**/proxy": true,
+    "**/proxy-ref": true
+  },
   "files.exclude": {
     "**/.local": true,
     "**/.config": true
@@ -323,12 +342,16 @@ normalized[username] = True
 users_file.write_text(json.dumps(normalized, indent=2, sort_keys=True) + "\n")
 PY
 
-if ! docker run -d \
+# Created stopped: gateway-reconciler starts it once the student checks in
+# and stops it after they submit. --init lets `docker stop` end it promptly.
+if ! docker create \
   --name "code-$USERNAME" \
+  --init \
   --network "$NETWORK" \
   --memory=512m \
   --memory-swap=512m \
   --cpus=1.0 \
+  --pids-limit=256 \
   --security-opt=no-new-privileges:true \
   --restart unless-stopped \
   -e CODE_SERVER_USERNAME="$USERNAME" \
@@ -338,11 +361,13 @@ if ! docker run -d \
   -e CODE_SERVER_SESSION_MONITORING_FILE="/var/log/code-server/$USERNAME-session-monitoring.jsonl" \
   -e CODE_SERVER_DISABLE_CLIPBOARD=1 \
   -e CODE_SERVER_HIDE_AGENT_SIDEBAR=1 \
+  -e BASH_ENV=/etc/bash.bashrc \
+  -v "$SCRIPT_DIR/student-bash.bashrc":/etc/bash.bashrc:ro \
   -v "$HOME_DIR":/home/coder \
   -v "$LOG_DIR":/var/log/code-server \
   code-server-image \
   node /opt/code-server/out/node/entry.js --bind-addr 0.0.0.0:8080 --auth none; then
-  echo "Failed to start container for $USERNAME" >&2
+  echo "Failed to create container for $USERNAME" >&2
   exit 1
 fi
 
@@ -350,6 +375,7 @@ LAN_IP=$(hostname -I | awk '{print $1}')
 echo "USERNAME (Andrew ID): $USERNAME"
 echo "Auth: Google SSO via gateway (no password)"
 echo "Network: docker-only (no host port published)"
+echo "Container: created stopped; starts when the student is checked in"
 echo "Gateway URL (LAN): http://${LAN_IP}/"
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   echo "Public gateway: https://${PUBLIC_BASE_DOMAIN}/"

@@ -142,7 +142,8 @@ Required: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. File is gitignored. Gatewa
 **Default Configuration:**
 
 - Network: `debug-server-net` (no published ports)
-- Limits: 512 MB RAM, 1 CPU
+- Limits: 512 MB RAM, 1 CPU, 256 processes/threads; student shell processes get 600 CPU-seconds each (`student-bash.bashrc`, mounted over `/etc/bash.bashrc`)
+- Lightweight editor: git, TypeScript/JS language services, update checks and telemetry disabled; build outputs excluded from file watching
 - Restart: `unless-stopped`
 - Session monitoring and clipboard restrictions enabled
 - Auto-open bash terminal in an editor tab
@@ -255,6 +256,8 @@ Staff do not need to be in `users.json`. The file is read on every request; it i
 - When time runs out, the workspace closes on its own at the deadline.
 - Either way, the student lands on `/checkin`, which says why their workspace is closed. Saved files stay in their home directory.
 - To reopen a student, **Undo** their check-in and check them in again. This starts a fresh timer.
+
+**Containers.** `create_codeserver.sh` creates student containers stopped. The `gateway-reconciler` container (started by `start-gateway.sh`) starts `code-<andrew-id>` when the student is checked in to the active assignment and stops it once they submit, run out of time, are un-checked or the session closes. Staff containers always run. Home directories are kept. The reconciler holds the Docker socket and runs with `--network none`. Logs: `docker logs gateway-reconciler`.
 
 Audit lines (`checkin.*`, never containing codes) go to `docker logs gateway`. Tests: `cd gateway && npm test`.
 

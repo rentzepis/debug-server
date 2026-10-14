@@ -71,7 +71,7 @@ CHECKIN_QR_SECRET=$(cat "$CHECKIN_SECRET_FILE")
 echo "Building ${IMAGE}..."
 docker build -t "${IMAGE}" "$SCRIPT_DIR/gateway"
 
-docker rm -f gateway 2>/dev/null || true
+docker rm -f gateway gateway-reconciler 2>/dev/null || true
 
 DOCKER_ENV=(
   -e SESSION_SECRET="$SESSION_SECRET"
@@ -85,9 +85,12 @@ if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
 fi
 
+# Higher CPU weight than student containers (default 1024) so sign-in and
+# proxying stay responsive when the whole class is compiling at once.
 docker run -d \
   --name gateway \
   --restart unless-stopped \
+  --cpu-shares=4096 \
   --network "$NETWORK" \
   -p "${GATEWAY_PORT}:8080" \
   "${DOCKER_ENV[@]}" \
@@ -95,6 +98,20 @@ docker run -d \
   -v "$STAFF_FILE:/data/staff.json:ro" \
   -v "$DATA_DIR:/data/state" \
   "${IMAGE}"
+
+# Starts each student's container while they are checked in and stops it once
+# they submit, run out of time or are un-checked. It holds the Docker socket, so
+# it gets no network; the internet-facing gateway never touches Docker.
+docker run -d \
+  --name gateway-reconciler \
+  --restart unless-stopped \
+  --network none \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$USERS_FILE:/data/users.json:ro" \
+  -v "$STAFF_FILE:/data/staff.json:ro" \
+  -v "$DATA_DIR:/data/state:ro" \
+  "${IMAGE}" \
+  node containers/reconcile.js
 
 LAN_IP=$(hostname -I | awk '{print $1}')
 if [[ "$GATEWAY_PORT" == "80" ]]; then
@@ -127,6 +144,7 @@ if [[ "$healthy" -eq 1 ]]; then
   fi
   echo "  Listening port: ${GATEWAY_PORT} (not 8080 — that is a separate service on this host)"
   echo "  Instructor dashboard: /instructor (staff in gateway/staff.json)"
+  echo "  Student containers run only while checked in (docker logs gateway-reconciler)"
 else
   echo "Gateway container started but health check failed on ${LOCAL_URL}" >&2
   docker logs gateway 2>&1 | tail -10 >&2

@@ -86,9 +86,23 @@ proxy.on("proxyRes", (proxyRes, req, res) => {
   });
 });
 
-proxy.on("error", (err, _req, res) => {
+proxy.on("error", (err, req, res) => {
   console.error("proxy error:", err.message);
-  if (res && !res.headersSent && typeof res.writeHead === "function") {
+  // Containers are started on check-in by the reconciler, so a just-checked-in
+  // student can arrive before code-server is listening.
+  const booting =
+    req.workspaceUser &&
+    workspaceUnlocked(req.workspaceUser) &&
+    req.method === "GET" &&
+    String(req.headers.accept || "").includes("text/html");
+  if (booting && res && !res.headersSent && typeof res.writeHead === "function") {
+    res.writeHead(503, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": "2",
+    });
+    res.end(renderStartingPage());
+  } else if (res && !res.headersSent && typeof res.writeHead === "function") {
     res.writeHead(502, { "Content-Type": "text/plain" });
     res.end("Workspace unavailable. Is the student container running?");
   } else if (res && typeof res.destroy === "function") {
@@ -352,6 +366,17 @@ function renderNotEnrolledPage(andrewId) {
   });
 }
 
+function renderStartingPage() {
+  return pageShell({
+    title: "Starting workspace",
+    heading: "Starting your workspace…",
+    bodyHtml: `
+      <p class="hint">This page reloads automatically. It usually takes a few seconds.</p>
+      <script>setTimeout(() => location.reload(), 2000);</script>
+    `,
+  });
+}
+
 function renderForbiddenPage({ message } = {}) {
   return pageShell({
     title: "Access denied",
@@ -450,6 +475,7 @@ function stripCookieHeaderForProxy(req) {
 
 function proxyWorkspace(req, res, username) {
   stripCookieHeaderForProxy(req);
+  req.workspaceUser = username;
   const target = workspaceTarget(username);
   const isWorkbenchPage =
     req.method === "GET" && req.path === "/" && String(req.headers.accept || "").includes("text/html");
@@ -530,7 +556,9 @@ app.get("/", (req, res, next) => {
   if (user) {
     const users = loadUsers();
     const username = findUsername(users, user);
-    if (!username && isStaff(user)) {
+    // Staff land on the dashboard even if enrolled; it links to their workspace.
+    // On LAN that workspace link is "/?folder=…", which must still get through.
+    if (isStaff(user) && !(username && !PUBLIC_BASE_DOMAIN && req.query.folder)) {
       return res.redirect(302, "/instructor");
     }
     if (username) {

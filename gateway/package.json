@@ -4,7 +4,7 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "test": "node --test checkin/*.test.js"
+    "test": "node --test checkin/*.test.js containers/*.test.js"
   },
   "dependencies": {
     "cookie-session": "^2.1.0",
