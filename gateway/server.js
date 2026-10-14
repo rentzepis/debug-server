@@ -4,9 +4,15 @@ const fs = require("fs");
 const httpProxy = require("http-proxy");
 const cookieSession = require("cookie-session");
 const { OAuth2Client } = require("google-auth-library");
+const { createCheckinStore } = require("./checkin/store");
+const { createCheckinTokenService } = require("./checkin/tokenService");
+const { registerCheckinRoutes } = require("./checkin/routes");
 
 const PORT = Number(process.env.PORT || 8080);
 const USERS_FILE = process.env.USERS_FILE || "/data/users.json";
+const STAFF_FILE = process.env.STAFF_FILE || "/data/staff.json";
+const CHECKIN_STATE_FILE = process.env.CHECKIN_STATE_FILE || "/data/state/checkins.json";
+const CHECKIN_QR_SECRET = process.env.CHECKIN_QR_SECRET || "";
 const PUBLIC_BASE_DOMAIN = (process.env.PUBLIC_BASE_DOMAIN || "").trim().toLowerCase();
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
@@ -25,6 +31,13 @@ if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
   console.error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required");
   process.exit(1);
 }
+if (!CHECKIN_QR_SECRET) {
+  console.error("CHECKIN_QR_SECRET is required");
+  process.exit(1);
+}
+
+const checkinStore = createCheckinStore({ file: CHECKIN_STATE_FILE });
+const checkinTokens = createCheckinTokenService({ getSecret: () => CHECKIN_QR_SECRET });
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET);
 
@@ -34,6 +47,43 @@ const proxy = httpProxy.createProxyServer({
   // generates correct absolute URLs behind Cloudflare Tunnel.
   changeOrigin: false,
   ws: true,
+});
+
+// Tear down the upstream workspace socket whenever the browser side closes,
+// including when a check-in is revoked.
+proxy.on("proxyReqWs", (proxyReq, _req, socket) => {
+  proxyReq.once("upgrade", (_res, proxySocket) => {
+    socket.once("close", () => proxySocket.destroy());
+  });
+});
+
+const WORKSPACE_BAR_TAG = '<script defer src="/_gateway/workspace-bar.js"></script>';
+
+// Only the workbench page itself is buffered (see proxyWorkspace); everything
+// else streams through http-proxy untouched.
+proxy.on("proxyRes", (proxyRes, req, res) => {
+  if (!req.injectWorkspaceBar) {
+    return;
+  }
+  const headers = { ...proxyRes.headers };
+  const isHtml = String(headers["content-type"] || "").includes("text/html");
+  if (proxyRes.statusCode !== 200 || !isHtml || headers["content-encoding"]) {
+    res.writeHead(proxyRes.statusCode, proxyRes.statusMessage, headers);
+    proxyRes.pipe(res);
+    return;
+  }
+  const chunks = [];
+  proxyRes.on("data", (chunk) => chunks.push(chunk));
+  proxyRes.on("error", () => res.destroy());
+  proxyRes.on("end", () => {
+    const html = Buffer.concat(chunks).toString("utf8");
+    const body = html.replace("</head>", `${WORKSPACE_BAR_TAG}</head>`);
+    delete headers["transfer-encoding"];
+    delete headers.connection;
+    headers["content-length"] = Buffer.byteLength(body);
+    res.writeHead(200, headers);
+    res.end(body);
+  });
 });
 
 proxy.on("error", (err, _req, res) => {
@@ -64,6 +114,27 @@ function findUsername(users, username) {
   }
   const lower = username.toLowerCase();
   return Object.keys(users).find((u) => u.toLowerCase() === lower) || null;
+}
+
+function loadStaff() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(STAFF_FILE, "utf8") || "[]");
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string" && s) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isStaff(username) {
+  if (!username) {
+    return false;
+  }
+  const lower = String(username).toLowerCase();
+  return loadStaff().some((s) => s.toLowerCase() === lower);
+}
+
+function workspaceUnlocked(username) {
+  return isStaff(username) || checkinStore.isUnlocked(username);
 }
 
 function escapeHtml(value) {
@@ -136,17 +207,26 @@ function requestIsHttps(req) {
   return proto === "https";
 }
 
-function absoluteUrl(req, pathname) {
+function requestOrigin(req) {
   const host = req.get("host");
   const proto = requestIsHttps(req) ? "https" : "http";
-  return `${proto}://${host}${pathname}`;
+  return `${proto}://${host}`;
+}
+
+function absoluteUrl(req, pathname) {
+  return `${requestOrigin(req)}${pathname}`;
 }
 
 function googleRedirectUri(req) {
   return absoluteUrl(req, "/auth/google/callback");
 }
 
-function pageShell({ title, heading, bodyHtml }) {
+function pageShell({ title, heading, bodyHtml, wide = false, scripts = [] }) {
+  const extraHead = scripts.length
+    ? `<link rel="stylesheet" href="/_gateway/gateway.css" />\n${scripts
+        .map((src) => `    <script src="${escapeHtml(src)}" defer></script>`)
+        .join("\n")}`
+    : "";
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -217,11 +297,13 @@ function pageShell({ title, heading, bodyHtml }) {
         font-size: 0.95rem;
         margin: 0;
       }
+      .card-box.wide { max-width: 1000px; }
     </style>
+    ${extraHead}
   </head>
   <body>
     <div class="center-container">
-      <div class="card-box">
+      <div class="card-box${wide ? " wide" : ""}">
         <div class="header">
           <h1>${escapeHtml(heading)}</h1>
         </div>
@@ -292,15 +374,38 @@ function isGatewayRoute(pathname) {
     pathname === "/logout" ||
     pathname === "/auth/google" ||
     pathname === "/auth/google/callback" ||
-    pathname.startsWith("/auth/google/")
+    pathname.startsWith("/auth/google/") ||
+    pathname === "/checkin" ||
+    pathname === "/instructor" ||
+    pathname === "/_gateway" ||
+    pathname.startsWith("/_gateway/")
   );
 }
 
-function loginUrl(req) {
+function apexUrl(req, pathname) {
   if (PUBLIC_BASE_DOMAIN && getSubdomainUser(req.hostname)) {
-    return `https://${PUBLIC_BASE_DOMAIN}/login`;
+    return `https://${PUBLIC_BASE_DOMAIN}${pathname}`;
   }
-  return "/login";
+  return pathname;
+}
+
+function loginUrl(req) {
+  return apexUrl(req, "/login");
+}
+
+/** Where a signed-in user should land after SSO or when visiting /login. */
+function homeUrlFor(username) {
+  if (isStaff(username)) {
+    return "/instructor";
+  }
+  return workspaceUnlocked(username) ? workspaceRedirectUrl(username) : "/checkin";
+}
+
+function sendCheckinRequired(req, res) {
+  if (req.accepts("html")) {
+    return res.redirect(302, apexUrl(req, "/checkin"));
+  }
+  return res.status(403).type("text").send("Check-in required");
 }
 
 function requireWorkspaceSession(req, res, username) {
@@ -343,6 +448,21 @@ function stripCookieHeaderForProxy(req) {
   }
 }
 
+function proxyWorkspace(req, res, username) {
+  stripCookieHeaderForProxy(req);
+  const target = workspaceTarget(username);
+  const isWorkbenchPage =
+    req.method === "GET" && req.path === "/" && String(req.headers.accept || "").includes("text/html");
+  if (!isWorkbenchPage) {
+    proxy.web(req, res, { target });
+    return;
+  }
+  // Request an uncompressed page so the workspace bar script can be spliced in.
+  req.headers["accept-encoding"] = "identity";
+  req.injectWorkspaceBar = true;
+  proxy.web(req, res, { target, selfHandleResponse: true });
+}
+
 const app = express();
 app.set("trust proxy", true);
 
@@ -377,7 +497,9 @@ app.use((req, _res, next) => {
 // proxied request hangs forever.
 app.use((req, res, next) => {
   const sub = getSubdomainUser(req.hostname);
-  if (!sub) {
+  // The workspace bar loads its script and session API from the gateway on the
+  // student's own subdomain.
+  if (!sub || req.path.startsWith("/_gateway/")) {
     return next();
   }
 
@@ -393,9 +515,11 @@ app.use((req, res, next) => {
   if (!requireWorkspaceSession(req, res, username)) {
     return;
   }
+  if (!workspaceUnlocked(username)) {
+    return sendCheckinRequired(req, res);
+  }
 
-  stripCookieHeaderForProxy(req);
-  proxy.web(req, res, { target: workspaceTarget(username) });
+  proxyWorkspace(req, res, username);
 });
 
 // Body parser only for apex gateway routes (not proxied subdomains).
@@ -406,7 +530,13 @@ app.get("/", (req, res, next) => {
   if (user) {
     const users = loadUsers();
     const username = findUsername(users, user);
+    if (!username && isStaff(user)) {
+      return res.redirect(302, "/instructor");
+    }
     if (username) {
+      if (!workspaceUnlocked(username)) {
+        return res.redirect(302, "/checkin");
+      }
       if (PUBLIC_BASE_DOMAIN) {
         return res.redirect(302, workspaceRedirectUrl(username));
       }
@@ -422,8 +552,8 @@ app.get("/login", (req, res) => {
   if (user) {
     const users = loadUsers();
     const username = findUsername(users, user);
-    if (username) {
-      return res.redirect(302, workspaceRedirectUrl(username));
+    if (username || isStaff(user)) {
+      return res.redirect(302, homeUrlFor(username || user));
     }
   }
   const error = typeof req.query.error === "string" ? req.query.error : undefined;
@@ -522,14 +652,14 @@ app.get("/auth/google/callback", async (req, res) => {
     }
 
     const users = loadUsers();
-    const username = findUsername(users, andrewId);
+    const username = findUsername(users, andrewId) || (isStaff(andrewId) ? andrewId : null);
     if (!username) {
       req.session = null;
       return res.status(403).type("html").send(renderNotEnrolledPage(andrewId));
     }
 
     req.session.user = username;
-    return res.redirect(302, workspaceRedirectUrl(username));
+    return res.redirect(302, homeUrlFor(username));
   } catch (err) {
     console.error("Google OAuth callback failed:", err.message);
     return res
@@ -549,6 +679,69 @@ app.get("/logout", (req, res) => {
   res.redirect(302, "/login");
 });
 
+/** username (lowercase) -> Set of client sockets proxied to that workspace */
+const workspaceSockets = new Map();
+
+function trackWorkspaceSocket(username, socket) {
+  const key = username.toLowerCase();
+  let sockets = workspaceSockets.get(key);
+  if (!sockets) {
+    sockets = new Set();
+    workspaceSockets.set(key, sockets);
+  }
+  sockets.add(socket);
+  // Revocation may happen before http-proxy attaches its own error handler.
+  socket.on("error", () => {});
+  // Time limits are fixed per assignment and every other relock goes through
+  // revokeLockedWorkspaceSockets, so one timer per socket covers expiry.
+  const session = checkinStore.getSession(username);
+  const deadlineTimer =
+    session && session.deadline
+      ? setTimeout(() => {
+          if (!workspaceUnlocked(username)) {
+            socket.destroy(new Error("time limit reached"));
+          }
+        }, Math.max(0, Date.parse(session.deadline) - Date.now()))
+      : null;
+  socket.once("close", () => {
+    clearTimeout(deadlineTimer);
+    sockets.delete(socket);
+    if (!sockets.size && workspaceSockets.get(key) === sockets) {
+      workspaceSockets.delete(key);
+    }
+  });
+}
+
+/** Disconnect open editors of every user who is no longer checked in. */
+function revokeLockedWorkspaceSockets() {
+  const users = loadUsers();
+  for (const [key, sockets] of workspaceSockets) {
+    const username = findUsername(users, key) || key;
+    if (workspaceUnlocked(username)) {
+      continue;
+    }
+    for (const socket of sockets) {
+      // http-proxy only closes the upstream socket on a client "error".
+      socket.destroy(new Error("check-in revoked"));
+    }
+  }
+}
+
+registerCheckinRoutes(app, {
+  store: checkinStore,
+  tokens: checkinTokens,
+  loadUsers,
+  findUsername,
+  isStaff,
+  sessionUser,
+  requestOrigin,
+  workspaceRedirectUrl,
+  checkinPageUrl: (req) => apexUrl(req, "/checkin"),
+  pageShell,
+  escapeHtml,
+  onLocksChanged: revokeLockedWorkspaceSockets,
+});
+
 // LAN mode: after SSO, proxy the gateway apex to the signed-in user's
 // container (code-server cannot live under a /w/<user> subpath).
 app.use((req, res, next) => {
@@ -564,12 +757,17 @@ app.use((req, res, next) => {
   const users = loadUsers();
   const username = findUsername(users, loggedIn);
   if (!username) {
+    if (isStaff(loggedIn)) {
+      return res.redirect(302, "/instructor");
+    }
     req.session = null;
     return res.redirect(302, "/login");
   }
+  if (!workspaceUnlocked(username)) {
+    return sendCheckinRequired(req, res);
+  }
 
-  stripCookieHeaderForProxy(req);
-  proxy.web(req, res, { target: workspaceTarget(username) });
+  proxyWorkspace(req, res, username);
 });
 
 app.use((_req, res) => {
@@ -633,6 +831,11 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
+  if (!workspaceUnlocked(username)) {
+    socket.destroy();
+    return;
+  }
+
   if (req.headers.cookie) {
     const parts = String(req.headers.cookie)
       .split(";")
@@ -645,5 +848,6 @@ server.on("upgrade", (req, socket, head) => {
     }
   }
 
+  trackWorkspaceSocket(username, socket);
   proxy.ws(req, socket, head, { target: workspaceTarget(username) });
 });

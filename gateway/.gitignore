@@ -1,4 +1,7 @@
 .session_secret
+.checkin_secret
+staff.json
+data/
 .env
 node_modules/
 users.json

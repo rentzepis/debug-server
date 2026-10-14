@@ -15,6 +15,7 @@ Design constraints:
 | Auth       | Google SSO only; code-server `auth: none`; enrollment via `gateway/users.json`               |
 | Integrity  | Clipboard disabled by default; AI chat / Copilot and third-party extensions blocked          |
 | Monitoring | Per-user browser focus / tab / login logs under `logs/`                                      |
+| Check-in   | Workspaces locked until staff check the student in to the active assignment (QR / passcode)  |
 | Ops        | Provision, reset, or stop containers with `create_codeserver.sh`; `--restart unless-stopped` |
 
 
@@ -35,6 +36,9 @@ code-<username>  (auth: none, no host ports)
 | ------------------------------------------ | ----------------------------------------------------------- |
 | `code-server-image/`                       | Custom code-server + VS Code image                          |
 | `gateway/`                                 | SSO gateway and subdomain proxy                             |
+| `gateway/checkin/`, `gateway/public/`      | Check-in protocol, store, routes and dashboard assets       |
+| `gateway/staff.json`                       | Staff allowlist for the instructor dashboard                |
+| `gateway/data/checkins.json`               | Assignments, active assignment and check-in records         |
 | `create_codeserver.sh`                     | Create / reset / stop student containers; updates allowlist |
 | `start-gateway.sh`                         | Build and run the gateway                                   |
 | `starter/`                                 | Handout files copied into student homes                     |
@@ -221,6 +225,45 @@ tail -f logs/jsmith-session-monitoring.jsonl
 | `DISCONNECT`                 | Page close or navigation away |
 
 
+### Check-in
+
+Students cannot open their workspace until a staff member checks them in to the **active assignment**. With no active assignment every student is locked out (staff are exempt).
+
+**Staff.** List instructor/TA Andrew IDs in `gateway/staff.json` (created as `[]` by `start-gateway.sh`):
+
+```json
+["prof1", "ta2"]
+```
+
+Staff do not need to be in `users.json`. The file is read on every request; it is bind-mounted as a single file, so edit it in place (or restart the gateway after replacing it).
+
+**Workflow** (`https://213-debug.com/instructor`, or `http://<SERVER_IP>/instructor`):
+
+1. Create an assignment (e.g. `proxylab-checkoff`, optionally with a time limit in minutes) and click **Make active**. Only one assignment is active at a time; older ones remain as attendance history.
+2. Students who sign in see `/checkin`: a QR code that rotates every 2 seconds plus a passcode field.
+3. Check them in by any of:
+   - **Start scanning** and point the camera at the student's screen.
+   - **Reveal passcode**: a four-digit code valid for 5 seconds that the student types in.
+   - **Check in** next to the student in the roster.
+4. **Undo**, **Clear check-ins**, switching the active assignment or **Close session** re-lock the affected students immediately and disconnect open editors.
+5. **Export CSV** downloads attendance, deadlines and submission times for the selected assignment.
+
+**Workspace bar.** Checked-in students see a bar above the editor with the assignment title, the time left and a **Submit** button. The gateway injects it into the code-server page, so no image rebuild is needed.
+
+- Each student's timer starts at *their* check-in, and untimed assignments show "No time limit".
+- **Submit** asks for confirmation (and warns about unsaved tabs), then closes the workspace.
+- When time runs out, the workspace closes on its own at the deadline.
+- Either way, the student lands on `/checkin`, which says why their workspace is closed. Saved files stay in their home directory.
+- To reopen a student, **Undo** their check-in and check them in again. This starts a fresh timer.
+
+Audit lines (`checkin.*`, never containing codes) go to `docker logs gateway`. Tests: `cd gateway && npm test`.
+
+Limitations:
+
+- The camera needs HTTPS (or `localhost`). On plain-HTTP LAN use the passcode or manual check-in.
+- Passcodes live in gateway memory and are lost on restart; QR tokens are signed with `gateway/.checkin_secret` (regenerate it to invalidate all codes).
+- Codes do not prove physical presence: a screenshot or relayed passcode works while valid.
+
 ### Clipboard
 
 Disabled by default (`CODE_SERVER_DISABLE_CLIPBOARD=1`):
@@ -245,6 +288,8 @@ Set `CODE_SERVER_DISABLE_CLIPBOARD=0` to allow clipboard for a container.
 | -------------------------------- | ----------------------------------------------------------------- |
 | Gateway fails to start           | Set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `gateway/.env` |
 | “Not enrolled”                   | `./create_codeserver.sh <username>`                               |
+| Student stuck on check-in page   | Make an assignment active and check them in at `/instructor`      |
+| Instructor dashboard redirects   | Add the Andrew ID to `gateway/staff.json`                         |
 | `redirect_uri_mismatch`          | Add exact callback URI in Google Cloud Console                    |
 | `NXDOMAIN` for `*.213-debug.com` | Add proxied `*` CNAME                                             |
 | Subdomain re-prompts login       | Confirm TLS at tunnel; restart gateway                            |

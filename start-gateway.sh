@@ -6,7 +6,10 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 NETWORK="debug-server-net"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
+STAFF_FILE="$SCRIPT_DIR/gateway/staff.json"
+DATA_DIR="$SCRIPT_DIR/gateway/data"
 SECRET_FILE="$SCRIPT_DIR/gateway/.session_secret"
+CHECKIN_SECRET_FILE="$SCRIPT_DIR/gateway/.checkin_secret"
 ENV_FILE="$SCRIPT_DIR/gateway/.env"
 DOMAIN_FILE="$SCRIPT_DIR/gateway/domain"
 IMAGE="gateway-image"
@@ -47,10 +50,23 @@ if [[ ! -s "$USERS_FILE" ]]; then
   echo '{}' > "$USERS_FILE"
 fi
 
+if [[ ! -s "$STAFF_FILE" ]]; then
+  echo '[]' > "$STAFF_FILE"
+  echo "Created $STAFF_FILE; add instructor/TA Andrew IDs to use the dashboard." >&2
+fi
+
+# Check-in state is written with atomic renames, so mount a directory, not a file.
+mkdir -p "$DATA_DIR"
+
 if [[ ! -f "$SECRET_FILE" ]]; then
   openssl rand -hex 32 > "$SECRET_FILE"
 fi
 SESSION_SECRET=$(cat "$SECRET_FILE")
+
+if [[ ! -s "$CHECKIN_SECRET_FILE" ]]; then
+  (umask 077 && openssl rand -hex 32 > "$CHECKIN_SECRET_FILE")
+fi
+CHECKIN_QR_SECRET=$(cat "$CHECKIN_SECRET_FILE")
 
 echo "Building ${IMAGE}..."
 docker build -t "${IMAGE}" "$SCRIPT_DIR/gateway"
@@ -63,6 +79,7 @@ DOCKER_ENV=(
   -e GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
   -e GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
   -e GOOGLE_ALLOWED_DOMAIN="$GOOGLE_ALLOWED_DOMAIN"
+  -e CHECKIN_QR_SECRET="$CHECKIN_QR_SECRET"
 )
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
@@ -75,6 +92,8 @@ docker run -d \
   -p "${GATEWAY_PORT}:8080" \
   "${DOCKER_ENV[@]}" \
   -v "$USERS_FILE:/data/users.json" \
+  -v "$STAFF_FILE:/data/staff.json:ro" \
+  -v "$DATA_DIR:/data/state" \
   "${IMAGE}"
 
 LAN_IP=$(hostname -I | awk '{print $1}')
@@ -107,6 +126,7 @@ if [[ "$healthy" -eq 1 ]]; then
     echo "  Domain mode:    LAN apex proxy (set gateway/domain or PUBLIC_BASE_DOMAIN for Cloudflare)"
   fi
   echo "  Listening port: ${GATEWAY_PORT} (not 8080 — that is a separate service on this host)"
+  echo "  Instructor dashboard: /instructor (staff in gateway/staff.json)"
 else
   echo "Gateway container started but health check failed on ${LOCAL_URL}" >&2
   docker logs gateway 2>&1 | tail -10 >&2
