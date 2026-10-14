@@ -29,6 +29,7 @@
   const scanStatusEl = $("scan-status");
   const flashEl = $("flash");
   const rosterCountEl = $("roster-count");
+  const rosterStatsEl = $("roster-stats");
   const filterEl = $("filter");
   const csvLink = $("csv");
   const snapshotsAllLink = $("snapshots-all");
@@ -342,6 +343,34 @@
     return td;
   }
 
+  function statusCell(status) {
+    const td = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = `pill ${status.className}`;
+    pill.textContent = status.text;
+    td.append(pill);
+    return td;
+  }
+
+  function renderStats(assignment, users) {
+    const counts = { in: 0, done: 0, out: 0 };
+    for (const user of users) counts[progress(assignment, user).className] += 1;
+    const stats = [
+      ["Working", counts.in, "in"],
+      ["Finished", counts.done, "done"],
+      ["Not checked in", counts.out, "out"],
+    ].map(([label, value, kind]) => {
+      const stat = document.createElement("div");
+      stat.className = `stat ${kind}`;
+      const number = document.createElement("strong");
+      number.textContent = String(value);
+      stat.append(number, document.createTextNode(label));
+      return stat;
+    });
+    rosterStatsEl.replaceChildren(...stats);
+    rosterStatsEl.hidden = false;
+  }
+
   function smallButton(label, className, onClick, disabled) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -438,6 +467,7 @@
     snapshotsAllLink.hidden = !assignment || !hasSnapshots;
     if (!assignment) {
       rosterCountEl.textContent = "";
+      rosterStatsEl.hidden = true;
       activityNoteEl.textContent = "";
       rosterBody.replaceChildren();
       return;
@@ -460,6 +490,7 @@
     const users = [...state.roster, ...Object.keys(checkins).filter((u) => !enrolled.has(u))];
     const checkedInCount = Object.keys(checkins).length;
     rosterCountEl.textContent = `${assignment.title}: ${checkedInCount} of ${state.roster.length} checked in`;
+    renderStats(assignment, users);
 
     const filter = filterEl.value.trim().toLowerCase();
     const rows = [];
@@ -516,7 +547,7 @@
 
         tr.append(
           userTd,
-          cell(status.text, status.className),
+          statusCell(status),
           cell(record ? formatTime(record.at) : ""),
           cell(record ? `${record.by} (${record.method})` : ""),
           cell(formatTime(status.finishedAt)),
