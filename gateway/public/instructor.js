@@ -54,6 +54,8 @@
   let activityFor = null;
   let expandedUser = null;
   let timeline = null;
+  // Scroll position of each terminal's keystroke list, kept across re-renders.
+  const keylogScroll = new Map();
   let loadingState = false;
   let reloadQueued = false;
   let mutating = false;
@@ -422,14 +424,13 @@
       td.append(note);
     }
     if (!timeline || timeline.user !== user) {
-      td.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Loading activity…" }));
-    } else if (!timeline.events.length) {
-      td.append(
-        Object.assign(document.createElement("p"), {
-          className: "hint",
-          textContent: "No browser activity recorded since check-in.",
-        }),
-      );
+      td.append(hint("Loading activity…"));
+      tr.append(td);
+      return tr;
+    }
+    td.append(heading("Browser"));
+    if (!timeline.events.length) {
+      td.append(hint("No browser activity recorded since check-in."));
     } else {
       const list = document.createElement("ol");
       list.className = "timeline";
@@ -446,8 +447,63 @@
       }
       td.append(list);
     }
+    td.append(...terminalInput(timeline));
     tr.append(td);
     return tr;
+  }
+
+  const hint = (textContent) => Object.assign(document.createElement("p"), { className: "hint", textContent });
+  const heading = (textContent) => Object.assign(document.createElement("h4"), { className: "timeline-heading", textContent });
+
+  function terminalInput(data) {
+    const out = [heading("Terminal input")];
+    if (!data.keystrokesAvailable) return [...out, hint("Keystroke logs are not mounted.")];
+    if (!data.terminals.length) return [...out, hint("Nothing typed in a terminal since check-in.")];
+    if (data.terminalsTruncated) out.push(hint("Long log: showing the most recent 2,000 lines."));
+    for (const terminal of data.terminals) {
+      // No end is recorded if the container stops under it (deadline, submit).
+      const closed = terminal.endedAt ? `, closed ${formatTime(terminal.endedAt)}` : "";
+      out.push(hint(`Terminal opened ${formatTime(terminal.startedAt)}${closed}`));
+      const list = document.createElement("ol");
+      list.className = "timeline keylog";
+      for (const line of terminal.lines) list.append(keylogLine(line));
+      out.push(list);
+      // The roster re-renders on every poll: follow new input like a terminal
+      // unless staff scrolled up to read.
+      const saved = keylogScroll.get(`${data.user}/${terminal.id}`);
+      requestAnimationFrame(() => {
+        list.scrollTop = saved && !saved.atBottom ? saved.top : list.scrollHeight;
+      });
+      list.addEventListener("scroll", () => {
+        const atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 4;
+        keylogScroll.set(`${data.user}/${terminal.id}`, { top: list.scrollTop, atBottom });
+      });
+    }
+    return out;
+  }
+
+  function keylogLine(line) {
+    const li = document.createElement("li");
+    const time = Object.assign(document.createElement("span"), { className: "timeline-time", textContent: formatTime(line.at) });
+    const text = Object.assign(document.createElement("code"), { className: "keylog-text", textContent: line.text });
+    li.append(time, text);
+    if (!line.exact) {
+      text.classList.add("inexact");
+      text.title = "Tab completion, history or a full-screen program was involved, so what ran may differ.";
+    }
+    if (line.end && line.end !== "Enter") li.append(kbd(line.end));
+    if (line.keys.some((k) => typeof k !== "string")) {
+      const raw = document.createElement("span");
+      raw.className = "keylog-raw";
+      raw.title = "Keys as typed";
+      for (const k of line.keys) raw.append(typeof k === "string" ? k : kbd(k.key));
+      li.append(raw);
+    }
+    return li;
+  }
+
+  function kbd(key) {
+    return Object.assign(document.createElement("kbd"), { textContent: key });
   }
 
   function toggleTimeline(user) {
@@ -482,7 +538,7 @@
     if (currentActivity && !currentActivity.snapshotsAvailable) {
       notes.push("The snapshot folder is not mounted, so no work snapshots are taken.");
     }
-    notes.push("Click an Andrew ID to see that student's activity timeline.");
+    notes.push("Click an Andrew ID to see that student's browser activity and terminal input.");
     activityNoteEl.textContent = notes.join(" ");
 
     const checkins = assignment.checkins;

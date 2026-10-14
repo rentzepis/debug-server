@@ -16,6 +16,25 @@ ulimit -t 600 2>/dev/null
 # If not running interactively, don't do anything
 [ -z "$PS1" ] && return
 
+# Keystroke log: every interactive terminal is re-run under script(1), which
+# records the bytes typed into it (not its output) with timings. The gateway
+# shows them to staff on the instructor dashboard. The shell is restarted with
+# its original arguments so VS Code's --init-file shell integration survives.
+# That shell reads this file again; its parent being script stops the loop.
+# Skipped if the log directory is unusable, so a terminal still opens.
+if [ -n "${CODE_SERVER_KEYSTROKE_LOG_DIR:-}" ] \
+  && [ "$(readlink "/proc/$PPID/exe" 2>/dev/null)" != /usr/bin/script ] \
+  && [ -x /usr/bin/script ] \
+  && mkdir -p "$CODE_SERVER_KEYSTROKE_LOG_DIR" 2>/dev/null \
+  && [ -w "$CODE_SERVER_KEYSTROKE_LOG_DIR" ]; then
+  mapfile -d '' __keylog_argv < "/proc/$$/cmdline"
+  printf -v __keylog_cmd '%q ' /bin/bash "${__keylog_argv[@]:1}"
+  case "${__keylog_argv[0]}" in -*) __keylog_cmd+="-l" ;; esac
+  __keylog="$CODE_SERVER_KEYSTROKE_LOG_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  SHELL=/bin/bash exec /usr/bin/script -q -f -m advanced \
+    -I "$__keylog.in" -T "$__keylog.timing" -c "exec $__keylog_cmd"
+fi
+
 # check the window size after each command and, if necessary,
 # update the values of LINES and COLUMNS.
 shopt -s checkwinsize
