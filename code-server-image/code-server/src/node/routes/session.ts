@@ -265,8 +265,6 @@ class SessionMonitoringSink {
   const endpoint = scriptSrc
     ? scriptSrc.replace(/monitor\\.js(\\?.*)?$/, "event")
     : new URL("session/event", window.location.href).href;
-  let lastVisibility;
-  let lastFocused;
   let unloading = false;
 
   const currentState = () => ({
@@ -327,27 +325,61 @@ class SessionMonitoringSink {
     }
   };
 
-  const emitVisibility = () => {
-    const state = currentState();
-    if (state.visibility === lastVisibility) {
-      return;
-    }
-    lastVisibility = state.visibility;
-    send(state.visibility === "hidden" ? "visibility-hidden" : "visibility-visible");
+  // A state must hold this long before it is logged. Shorter transitions are
+  // noise (focus bouncing through webview iframes, OS focus flicker, etc.).
+  const SETTLE_MS = 100;
+
+  // Tracks one boolean-ish piece of state. A change is only emitted once it has
+  // persisted for SETTLE_MS; a change that reverts within that window is dropped.
+  // The emitted timestamp is when the change first happened, not when it settled.
+  const createTracker = (read, eventFor) => {
+    let last;
+    let timer;
+    let changedAt;
+    const commit = () => {
+      timer = undefined;
+      const value = read();
+      if (value === last) {
+        return;
+      }
+      last = value;
+      send(eventFor(value), { timestamp: changedAt.toISOString() });
+    };
+    return {
+      check: () => {
+        if (read() === last) {
+          clearTimeout(timer);
+          timer = undefined;
+          return;
+        }
+        if (timer === undefined) {
+          changedAt = new Date();
+          timer = setTimeout(commit, SETTLE_MS);
+        }
+      },
+      reset: () => {
+        clearTimeout(timer);
+        timer = undefined;
+        last = undefined;
+      },
+    };
   };
 
-  const emitFocus = () => {
-    const state = currentState();
-    if (state.focused === lastFocused) {
-      return;
-    }
-    lastFocused = state.focused;
-    send(state.focused ? "window-focus" : "window-blur");
-  };
+  const visibility = createTracker(
+    () => currentState().visibility,
+    (v) => (v === "hidden" ? "visibility-hidden" : "visibility-visible"),
+  );
+  const focus = createTracker(
+    () => currentState().focused,
+    (f) => (f ? "window-focus" : "window-blur"),
+  );
 
-  document.addEventListener("visibilitychange", emitVisibility, { passive: true });
-  window.addEventListener("focus", emitFocus, { passive: true });
-  window.addEventListener("blur", emitFocus, { passive: true });
+  document.addEventListener("visibilitychange", visibility.check, { passive: true });
+  window.addEventListener("focus", focus.check, { passive: true });
+  window.addEventListener("blur", focus.check, { passive: true });
+  // When focus is inside a webview iframe, switching apps fires blur/focus on
+  // the iframe's window, not ours — poll hasFocus() so those aren't missed.
+  setInterval(focus.check, 1000);
   window.addEventListener("pagehide", (e) => {
     // persisting into bfcache is not a real session end.
     if (e.persisted) {
@@ -361,14 +393,14 @@ class SessionMonitoringSink {
       return;
     }
     unloading = false;
-    lastVisibility = undefined;
-    lastFocused = undefined;
-    emitVisibility();
-    emitFocus();
+    visibility.reset();
+    focus.reset();
+    visibility.check();
+    focus.check();
   }, { passive: true });
 
-  emitVisibility();
-  emitFocus();
+  visibility.check();
+  focus.check();
 })();`;
   }
 }
