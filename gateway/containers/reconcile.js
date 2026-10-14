@@ -1,6 +1,7 @@
 const fs = require("fs");
 const http = require("http");
 const { createCheckinStore } = require("../checkin/store");
+const { dueSnapshots, takeSnapshot } = require("../snapshots/snapshots");
 
 const CONTAINER_PREFIX = "code-";
 
@@ -117,6 +118,63 @@ function main() {
   }
 
   log("reconcile.started", { intervalMs });
+  loop();
+
+  const homesDir = process.env.HOMES_DIR || "";
+  const snapshotsDir = process.env.SNAPSHOTS_DIR || "";
+  if (homesDir && snapshotsDir) {
+    snapshotLoop({
+      stateFile,
+      homesDir,
+      snapshotsDir,
+      intervalMs,
+      maxLagMs: Number(process.env.SNAPSHOT_MAX_LAG_MINUTES || 30) * 60_000,
+    });
+  } else {
+    log("snapshots.disabled", { reason: "HOMES_DIR and SNAPSHOTS_DIR are not both set" });
+  }
+}
+
+/**
+ * Archive each student's home once they submit or run out of time. Runs apart
+ * from the container loop so a burst of archives never delays a start.
+ */
+function snapshotLoop({ stateFile, homesDir, snapshotsDir, intervalMs, maxLagMs }) {
+  const RETRY_MS = 60_000;
+  const failedAt = new Map();
+
+  async function tick() {
+    const now = Date.now();
+    const state = createCheckinStore({ file: stateFile }).snapshot();
+    for (const job of dueSnapshots({ state, dir: snapshotsDir, nowMs: now, maxLagMs })) {
+      if (now - (failedAt.get(job.file) || -Infinity) < RETRY_MS) {
+        continue;
+      }
+      try {
+        const meta = await takeSnapshot({ homesDir, job, nowMs: Date.now() });
+        failedAt.delete(job.file);
+        log("snapshot.taken", meta);
+      } catch (err) {
+        failedAt.set(job.file, now);
+        log("snapshot.failed", {
+          assignment: job.assignmentId,
+          username: job.username,
+          error: err.message,
+        });
+      }
+    }
+  }
+
+  async function loop() {
+    try {
+      await tick();
+    } catch (err) {
+      log("snapshot.loop_failed", { error: err.message });
+    }
+    setTimeout(loop, intervalMs);
+  }
+
+  log("snapshots.started", { homesDir, snapshotsDir, maxLagMs });
   loop();
 }
 

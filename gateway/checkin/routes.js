@@ -1,8 +1,12 @@
+const { spawn } = require("child_process");
 const express = require("express");
+const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
 const { CHECKIN_QR_PAYLOAD_PREFIX } = require("./constants");
-const { deadlineMs } = require("./store");
+const { deadlineMs, finishInfo, extraMinutesFor } = require("./store");
+const { summarizeSession } = require("../monitoring/sessionLog");
+const { listSnapshots, snapshotPath } = require("../snapshots/snapshots");
 
 const PASSCODE_FAILURE_WINDOW_MS = 60_000;
 const PASSCODE_MAX_FAILURES = 5;
@@ -43,6 +47,8 @@ function registerCheckinRoutes(app, deps) {
     pageShell,
     escapeHtml,
     onLocksChanged,
+    sessionLogs,
+    snapshotsDir,
   } = deps;
 
   const passcodeIssuerByAssignment = new Map();
@@ -95,6 +101,38 @@ function registerCheckinRoutes(app, deps) {
       throw new HttpError(403, "A staff role is required");
     }
     return user;
+  }
+
+  /** Check-in to finish (or now): the span a student's activity is judged over. */
+  function activityWindow(assignment, username, nowMs) {
+    const record = assignment.checkins[username];
+    if (!record) {
+      return null;
+    }
+    const finish = finishInfo(assignment, username, nowMs);
+    // Log lines have whole-second timestamps; keep events from the check-in second.
+    const from = Math.floor(Date.parse(record.at) / 1000) * 1000;
+    return { from, to: finish ? Date.parse(finish.at) : nowMs };
+  }
+
+  function activitySummary(assignment, username, nowMs) {
+    const window = activityWindow(assignment, username, nowMs);
+    return window ? summarizeSession(sessionLogs.events(username), window.from, window.to) : null;
+  }
+
+  function requireAssignmentParam(req) {
+    const { id } = req.params;
+    if (!store.hasAssignment(id)) {
+      throw new HttpError(404, "Unknown assignment");
+    }
+    return store.getAssignment(id);
+  }
+
+  function wholeMinutes(value, label) {
+    if (!Number.isInteger(value)) {
+      throw new HttpError(400, `${label} must be a whole number of minutes`);
+    }
+    return value;
   }
 
   function recentPasscodeFailures(username, now) {
@@ -235,7 +273,17 @@ function registerCheckinRoutes(app, deps) {
       const me = requireStaff(req);
       const snapshot = store.snapshot();
       const assignments = Object.entries(snapshot.assignments)
-        .map(([id, a]) => ({ id, ...a }))
+        .map(([id, a]) => {
+          const checkins = {};
+          for (const [user, record] of Object.entries(a.checkins)) {
+            const deadline = deadlineMs(a, user);
+            checkins[user] = {
+              ...record,
+              deadline: deadline === null ? null : new Date(deadline).toISOString(),
+            };
+          }
+          return { id, ...a, extraMinutes: a.extraMinutes || {}, checkins };
+        })
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
       const roster = Object.keys(loadUsers()).sort((a, b) =>
         a.toLowerCase().localeCompare(b.toLowerCase()),
@@ -246,6 +294,7 @@ function registerCheckinRoutes(app, deps) {
         activeAssignmentId: snapshot.activeAssignmentId,
         assignments,
         roster,
+        serverNow: new Date().toISOString(),
       });
     }),
   );
@@ -263,6 +312,174 @@ function registerCheckinRoutes(app, deps) {
       }
       audit("checkin.assignment_created", { actor: me, assignment: id, timeLimitMinutes });
       return res.status(201).json({ id });
+    }),
+  );
+
+  api.patch(
+    "/instructor/assignments/:id",
+    handle(async (req, res) => {
+      const me = requireStaff(req);
+      const { id } = req.params;
+      requireAssignmentParam(req);
+      const changes = {};
+      for (const key of ["title", "timeLimitMinutes", "archived"]) {
+        if (req.body && Object.prototype.hasOwnProperty.call(req.body, key)) {
+          changes[key] = req.body[key];
+        }
+      }
+      let updated;
+      try {
+        updated = store.updateAssignment(id, changes);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+      // A new time limit can lock (or unlock) students who are working now.
+      onLocksChanged();
+      audit("checkin.assignment_updated", { actor: me, assignment: id, ...changes });
+      return res.json({ id, ...updated });
+    }),
+  );
+
+  api.post(
+    "/instructor/assignments/:id/extend",
+    handle(async (req, res) => {
+      const me = requireStaff(req);
+      const { id } = req.params;
+      requireAssignmentParam(req);
+      const minutes = wholeMinutes(req.body?.minutes, "Extension");
+      let result;
+      try {
+        result = store.extendAll(id, minutes);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+      audit("checkin.extended_all", { actor: me, assignment: id, minutes, count: result.extended.length });
+      return res.json({ extended: result.extended.length });
+    }),
+  );
+
+  api.put(
+    "/instructor/assignments/:id/extra-minutes/:user",
+    handle(async (req, res) => {
+      const me = requireStaff(req);
+      const assignment = requireAssignmentParam(req);
+      const rawUser = req.params.user;
+      // Former students keep their record, so their time can still be corrected.
+      const username =
+        canonicalEnrolled(rawUser) ||
+        (Object.prototype.hasOwnProperty.call(assignment.checkins, rawUser) ? rawUser : null);
+      if (!username) {
+        throw new HttpError(404, `${rawUser} is not enrolled`);
+      }
+      const minutes = wholeMinutes(req.body?.minutes, "Extra time");
+      let result;
+      try {
+        result = store.setExtraMinutes(req.params.id, username, minutes);
+      } catch (err) {
+        throw new HttpError(400, err.message);
+      }
+      onLocksChanged();
+      audit("checkin.extra_minutes", { actor: me, target: username, assignment: req.params.id, ...result });
+      return res.json({ username, ...result });
+    }),
+  );
+
+  api.post(
+    "/instructor/assignments/:id/checkins/:user/reopen",
+    handle(async (req, res) => {
+      const me = requireStaff(req);
+      requireAssignmentParam(req);
+      const { id, user } = req.params;
+      let result;
+      try {
+        result = store.reopen(id, user, { by: me });
+      } catch (err) {
+        throw new HttpError(409, err.message);
+      }
+      audit("checkin.reopened", { actor: me, target: user, assignment: id, finished: result.finished });
+      return res.json({ username: user, finished: result.finished });
+    }),
+  );
+
+  api.get(
+    "/instructor/assignments/:id/activity",
+    handle(async (req, res) => {
+      requireStaff(req);
+      const assignment = requireAssignmentParam(req);
+      const nowMs = Date.now();
+      const monitoring = {};
+      const monitoringAvailable = sessionLogs.available();
+      if (monitoringAvailable) {
+        for (const user of Object.keys(assignment.checkins)) {
+          monitoring[user] = activitySummary(assignment, user, nowMs);
+        }
+      }
+      return res.json({
+        monitoringAvailable,
+        monitoring,
+        snapshotsAvailable: Boolean(snapshotsDir) && fs.existsSync(snapshotsDir),
+        snapshots: listSnapshots(snapshotsDir, req.params.id),
+      });
+    }),
+  );
+
+  api.get(
+    "/instructor/assignments/:id/activity/:user",
+    handle(async (req, res) => {
+      requireStaff(req);
+      const assignment = requireAssignmentParam(req);
+      const window = activityWindow(assignment, req.params.user, Date.now());
+      if (!window) {
+        throw new HttpError(404, "Not checked in");
+      }
+      const events = sessionLogs
+        .events(req.params.user)
+        .filter((event) => event.at >= window.from && event.at <= window.to)
+        .map((event) => ({ at: new Date(event.at).toISOString(), label: event.label, detail: event.detail }));
+      return res.json({
+        from: new Date(window.from).toISOString(),
+        to: new Date(window.to).toISOString(),
+        events,
+      });
+    }),
+  );
+
+  api.get(
+    "/instructor/assignments/:id/snapshots/:user/:file",
+    handle(async (req, res) => {
+      requireStaff(req);
+      requireAssignmentParam(req);
+      const { id, user, file } = req.params;
+      const target = snapshotsDir ? snapshotPath(snapshotsDir, id, user, file) : null;
+      if (!target || !fs.existsSync(target)) {
+        throw new HttpError(404, "No such snapshot");
+      }
+      audit("snapshot.downloaded", { actor: sessionUser(req), target: user, assignment: id, file });
+      return res.download(target, `${id}-${user}-${file}`);
+    }),
+  );
+
+  api.get(
+    "/instructor/assignments/:id/snapshots.tar.gz",
+    handle(async (req, res) => {
+      requireStaff(req);
+      requireAssignmentParam(req);
+      const { id } = req.params;
+      if (!snapshotsDir || !fs.existsSync(path.join(snapshotsDir, id))) {
+        throw new HttpError(404, "No snapshots for this assignment yet");
+      }
+      audit("snapshot.downloaded_all", { actor: sessionUser(req), assignment: id });
+      res.set("Content-Type", "application/gzip");
+      res.set("Content-Disposition", `attachment; filename="snapshots-${id}.tar.gz"`);
+      const tar = spawn("tar", ["-czf", "-", "-C", snapshotsDir, id], { stdio: ["ignore", "pipe", "ignore"] });
+      tar.on("error", () => res.destroy());
+      tar.on("close", (code) => {
+        if (code !== 0) {
+          res.destroy();
+        }
+      });
+      res.on("close", () => tar.kill());
+      tar.stdout.pipe(res);
     }),
   );
 
@@ -406,21 +623,48 @@ function registerCheckinRoutes(app, deps) {
       const assignment = store.getAssignment(id);
       const { checkins } = assignment;
       const users = new Set([...Object.keys(loadUsers()), ...Object.keys(checkins)]);
+      const nowMs = Date.now();
+      const monitored = sessionLogs.available();
+      const snapshots = listSnapshots(snapshotsDir, id);
+      const seconds = (ms) => (ms === undefined ? "" : Math.round(ms / 1000));
       const rows = [
-        ["andrew_id", "checked_in", "checked_in_at", "checked_in_by", "method", "deadline", "submitted_at"],
+        [
+          "andrew_id",
+          "checked_in",
+          "checked_in_at",
+          "checked_in_by",
+          "method",
+          "extra_minutes",
+          "deadline",
+          "submitted_at",
+          "times_reopened",
+          "times_left_editor",
+          "seconds_away",
+          "longest_away_seconds",
+          "disconnects",
+          "snapshots",
+        ],
       ];
       for (const user of [...users].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
         const record = checkins[user];
-        const deadlineAt = record ? deadlineMs(assignment, record) : null;
+        const deadlineAt = deadlineMs(assignment, user);
         const deadline = deadlineAt === null ? "" : new Date(deadlineAt).toISOString();
+        const activity = record && monitored ? activitySummary(assignment, user, nowMs) : null;
         rows.push([
           user,
           record ? "yes" : "no",
           record?.at,
           record?.by,
           record?.method,
+          extraMinutesFor(assignment, user) || "",
           deadline,
           record?.submittedAt,
+          record?.reopened?.length || "",
+          activity?.awayCount,
+          seconds(activity?.awayMs),
+          seconds(activity?.longestAwayMs),
+          activity?.disconnects,
+          (snapshots[user] || []).map((s) => s.file).join(" "),
         ]);
       }
       res.set("Content-Type", "text/csv; charset=utf-8");
@@ -526,6 +770,21 @@ function registerCheckinRoutes(app, deps) {
               <button type="button" id="activate">Make active</button>
               <button type="button" id="deactivate" class="secondary">Close session</button>
             </div>
+            <div class="row wrap" style="margin-top: 10px;">
+              <label class="hint"><input type="checkbox" id="show-archived" /> Show archived</label>
+              <button type="button" id="extend-all" class="secondary small">Extend everyone…</button>
+            </div>
+            <details id="edit-details">
+              <summary>Edit selected assignment</summary>
+              <form id="edit-form" class="row wrap" autocomplete="off">
+                <input id="edit-title" placeholder="Title" maxlength="120" aria-label="Title" />
+                <input id="edit-minutes" type="number" min="1" max="1440" step="1"
+                       placeholder="Time limit, minutes (blank = none)" aria-label="Time limit in minutes" />
+                <button type="submit">Save</button>
+                <button type="button" id="archive" class="secondary">Archive</button>
+              </form>
+              <p class="hint">The ID cannot change. A new time limit applies to everyone already checked in.</p>
+            </details>
             <details>
               <summary>New assignment</summary>
               <form id="create-form" class="row wrap" autocomplete="off">
@@ -560,16 +819,23 @@ function registerCheckinRoutes(app, deps) {
             <div class="row wrap">
               <input id="filter" type="search" placeholder="Filter Andrew IDs" />
               <a id="csv" class="button secondary small" href="#">Export CSV</a>
+              <a id="snapshots-all" class="button secondary small" href="#">Download snapshots</a>
               <button type="button" id="clear" class="danger small">Clear check-ins</button>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Andrew ID</th><th>Status</th><th>Checked in</th><th>By</th><th>Method</th><th>Finished</th><th></th></tr>
+                  <tr>
+                    <th>Andrew ID</th><th>Status</th><th>Checked in</th><th>By</th><th>Finished</th>
+                    <th title="Times the student left the editor window or tab, and total time away">Away</th>
+                    <th title="Browser disconnects (page closed or reloaded)">Disc.</th>
+                    <th>Snapshot</th><th></th>
+                  </tr>
                 </thead>
                 <tbody id="roster"></tbody>
               </table>
             </div>
+            <p class="hint" id="activity-note"></p>
           </section>
         `,
       }),

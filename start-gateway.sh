@@ -8,6 +8,8 @@ NETWORK="debug-server-net"
 USERS_FILE="$SCRIPT_DIR/gateway/users.json"
 STAFF_FILE="$SCRIPT_DIR/gateway/staff.json"
 DATA_DIR="$SCRIPT_DIR/gateway/data"
+LOG_DIR="$SCRIPT_DIR/logs"
+SNAPSHOTS_DIR="$SCRIPT_DIR/snapshots"
 SECRET_FILE="$SCRIPT_DIR/gateway/.session_secret"
 CHECKIN_SECRET_FILE="$SCRIPT_DIR/gateway/.checkin_secret"
 ENV_FILE="$SCRIPT_DIR/gateway/.env"
@@ -56,7 +58,10 @@ if [[ ! -s "$STAFF_FILE" ]]; then
 fi
 
 # Check-in state is written with atomic renames, so mount a directory, not a file.
-mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR" "$LOG_DIR"
+# Work snapshots hold student code: readable by root only.
+mkdir -p "$SNAPSHOTS_DIR"
+chmod 700 "$SNAPSHOTS_DIR"
 
 if [[ ! -f "$SECRET_FILE" ]]; then
   openssl rand -hex 32 > "$SECRET_FILE"
@@ -80,6 +85,8 @@ DOCKER_ENV=(
   -e GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
   -e GOOGLE_ALLOWED_DOMAIN="$GOOGLE_ALLOWED_DOMAIN"
   -e CHECKIN_QR_SECRET="$CHECKIN_QR_SECRET"
+  -e SESSION_LOG_DIR=/data/logs
+  -e SNAPSHOTS_DIR=/data/snapshots
 )
 if [[ -n "$PUBLIC_BASE_DOMAIN" ]]; then
   DOCKER_ENV+=(-e PUBLIC_BASE_DOMAIN="$PUBLIC_BASE_DOMAIN")
@@ -97,19 +104,28 @@ docker run -d \
   -v "$USERS_FILE:/data/users.json" \
   -v "$STAFF_FILE:/data/staff.json:ro" \
   -v "$DATA_DIR:/data/state" \
+  -v "$LOG_DIR:/data/logs:ro" \
+  -v "$SNAPSHOTS_DIR:/data/snapshots:ro" \
   "${IMAGE}"
 
 # Starts each student's container while they are checked in and stops it once
 # they submit, run out of time or are un-checked. It holds the Docker socket, so
 # it gets no network; the internet-facing gateway never touches Docker.
+# It also archives each student's home into snapshots/ when they finish; it is
+# already root-equivalent via the socket, so reading /home adds no privilege,
+# and the gateway only ever sees the finished archives.
 docker run -d \
   --name gateway-reconciler \
   --restart unless-stopped \
   --network none \
+  -e HOMES_DIR=/homes \
+  -e SNAPSHOTS_DIR=/data/snapshots \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$USERS_FILE:/data/users.json:ro" \
   -v "$STAFF_FILE:/data/staff.json:ro" \
   -v "$DATA_DIR:/data/state:ro" \
+  -v /home:/homes:ro \
+  -v "$SNAPSHOTS_DIR:/data/snapshots" \
   "${IMAGE}" \
   node containers/reconcile.js
 

@@ -7,12 +7,18 @@ const { OAuth2Client } = require("google-auth-library");
 const { createCheckinStore } = require("./checkin/store");
 const { createCheckinTokenService } = require("./checkin/tokenService");
 const { registerCheckinRoutes } = require("./checkin/routes");
+const { createSessionLogReader } = require("./monitoring/sessionLog");
 
 const PORT = Number(process.env.PORT || 8080);
 const USERS_FILE = process.env.USERS_FILE || "/data/users.json";
 const STAFF_FILE = process.env.STAFF_FILE || "/data/staff.json";
 const CHECKIN_STATE_FILE = process.env.CHECKIN_STATE_FILE || "/data/state/checkins.json";
 const CHECKIN_QR_SECRET = process.env.CHECKIN_QR_SECRET || "";
+const SESSION_LOG_DIR = process.env.SESSION_LOG_DIR || "";
+const SNAPSHOTS_DIR = process.env.SNAPSHOTS_DIR || "";
+// Deadlines can move (extensions, edited time limits), so expiry is enforced
+// by sweeping open editors rather than by a timer fixed at connect time.
+const LOCK_SWEEP_MS = 1000;
 const PUBLIC_BASE_DOMAIN = (process.env.PUBLIC_BASE_DOMAIN || "").trim().toLowerCase();
 const SESSION_SECRET = process.env.SESSION_SECRET || "";
 const GOOGLE_CLIENT_ID = (process.env.GOOGLE_CLIENT_ID || "").trim();
@@ -311,7 +317,7 @@ function pageShell({ title, heading, bodyHtml, wide = false, scripts = [] }) {
         font-size: 0.95rem;
         margin: 0;
       }
-      .card-box.wide { max-width: 1000px; }
+      .card-box.wide { max-width: 1240px; }
     </style>
     ${extraHead}
   </head>
@@ -720,19 +726,7 @@ function trackWorkspaceSocket(username, socket) {
   sockets.add(socket);
   // Revocation may happen before http-proxy attaches its own error handler.
   socket.on("error", () => {});
-  // Time limits are fixed per assignment and every other relock goes through
-  // revokeLockedWorkspaceSockets, so one timer per socket covers expiry.
-  const session = checkinStore.getSession(username);
-  const deadlineTimer =
-    session && session.deadline
-      ? setTimeout(() => {
-          if (!workspaceUnlocked(username)) {
-            socket.destroy(new Error("time limit reached"));
-          }
-        }, Math.max(0, Date.parse(session.deadline) - Date.now()))
-      : null;
   socket.once("close", () => {
-    clearTimeout(deadlineTimer);
     sockets.delete(socket);
     if (!sockets.size && workspaceSockets.get(key) === sockets) {
       workspaceSockets.delete(key);
@@ -740,8 +734,11 @@ function trackWorkspaceSocket(username, socket) {
   });
 }
 
-/** Disconnect open editors of every user who is no longer checked in. */
+/** Disconnect open editors of every user who is no longer checked in or ran out of time. */
 function revokeLockedWorkspaceSockets() {
+  if (!workspaceSockets.size) {
+    return;
+  }
   const users = loadUsers();
   for (const [key, sockets] of workspaceSockets) {
     const username = findUsername(users, key) || key;
@@ -768,7 +765,11 @@ registerCheckinRoutes(app, {
   pageShell,
   escapeHtml,
   onLocksChanged: revokeLockedWorkspaceSockets,
+  sessionLogs: createSessionLogReader({ dir: SESSION_LOG_DIR }),
+  snapshotsDir: SNAPSHOTS_DIR,
 });
+
+setInterval(revokeLockedWorkspaceSockets, LOCK_SWEEP_MS).unref();
 
 // LAN mode: after SSO, proxy the gateway apex to the signed-in user's
 // container (code-server cannot live under a /w/<user> subpath).
