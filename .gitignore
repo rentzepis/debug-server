@@ -1,6 +1,13 @@
+.DS_Store
+.claude/
 logs/*
 gateway/users.json
 gateway/.session_secret
+gateway/.checkin_secret
+gateway/staff.json
+gateway/data/
+qrcode/
+qrcode.md
 student-code/*
 code-server-image/code-server/node_modules/*
 code-server-image/code-server/.cache/*

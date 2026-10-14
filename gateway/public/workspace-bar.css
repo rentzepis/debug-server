@@ -1,0 +1,51 @@
+html.has-workspace-bar body {
+  box-sizing: border-box;
+  padding-top: 32px !important;
+}
+
+.workspace-bar {
+  align-items: center;
+  background: #181818;
+  border-bottom: 1px solid #2b2b2b;
+  box-sizing: border-box;
+  color: #cccccc;
+  display: flex;
+  font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  gap: 16px;
+  height: 32px;
+  left: 0;
+  padding: 0 8px 0 14px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 100000;
+}
+
+.workspace-bar-title {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-bar-time {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.workspace-bar[data-urgency="warn"] .workspace-bar-time { color: #fbbf24; font-weight: 600; }
+.workspace-bar[data-urgency="urgent"] .workspace-bar-time { color: #f87171; font-weight: 700; }
+
+.workspace-bar-submit {
+  background: #2563eb;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 14px;
+}
+.workspace-bar-submit:hover:not(:disabled) { background: #1d4ed8; }
+.workspace-bar-submit:disabled { cursor: not-allowed; opacity: 0.55; }
