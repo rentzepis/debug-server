@@ -10,12 +10,60 @@ function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object, key);
 }
 
-/** Epoch ms when this check-in's time runs out, or null for untimed assignments. */
-function deadlineMs(assignment, record) {
+function extraMinutesFor(assignment, username) {
+  const extra = assignment.extraMinutes && hasOwn(assignment.extraMinutes, username)
+    ? assignment.extraMinutes[username]
+    : 0;
+  return Number.isInteger(extra) ? extra : 0;
+}
+
+/**
+ * Epoch ms when this student's time runs out, or null for untimed assignments
+ * and students who are not checked in. Includes their extra minutes.
+ */
+function deadlineMs(assignment, username) {
   const minutes = assignment.timeLimitMinutes;
-  return Number.isInteger(minutes) && minutes > 0
-    ? Date.parse(record.at) + minutes * 60_000
+  if (!(Number.isInteger(minutes) && minutes > 0) || !hasOwn(assignment.checkins, username)) {
+    return null;
+  }
+  const record = assignment.checkins[username];
+  return Date.parse(record.at) + (minutes + extraMinutesFor(assignment, username)) * 60_000;
+}
+
+/** When and why this student's work ended, or null while they may still work. */
+function finishInfo(assignment, username, nowMs) {
+  if (!hasOwn(assignment.checkins, username)) {
+    return null;
+  }
+  const record = assignment.checkins[username];
+  if (record.submittedAt) {
+    return { reason: "submitted", at: record.submittedAt };
+  }
+  const deadline = deadlineMs(assignment, username);
+  return deadline !== null && nowMs >= deadline
+    ? { reason: "expired", at: new Date(deadline).toISOString() }
     : null;
+}
+
+function validateTimeLimit(timeLimitMinutes) {
+  if (
+    timeLimitMinutes !== null &&
+    !(
+      Number.isInteger(timeLimitMinutes) &&
+      timeLimitMinutes >= 1 &&
+      timeLimitMinutes <= MAX_TIME_LIMIT_MINUTES
+    )
+  ) {
+    throw new Error(`Time limit must be a whole number of minutes from 1 to ${MAX_TIME_LIMIT_MINUTES}`);
+  }
+}
+
+function cleanTitleOrThrow(title) {
+  const cleanTitle = typeof title === "string" ? title.trim() : "";
+  if (cleanTitle.length > MAX_TITLE_LENGTH) {
+    throw new Error(`Title must be at most ${MAX_TITLE_LENGTH} characters`);
+  }
+  return cleanTitle;
 }
 
 function emptyState() {
@@ -71,12 +119,22 @@ function createCheckinStore({ file, now = Date.now }) {
   }
 
   /** "submitted", "expired", or null while the student may still work. */
-  function finishedReason(assignment, record) {
-    if (record.submittedAt) {
-      return "submitted";
+  function finishedReason(assignment, username) {
+    const finish = finishInfo(assignment, username, now());
+    return finish ? finish.reason : null;
+  }
+
+  function requireCheckedIn(assignment, username) {
+    if (!hasOwn(assignment.checkins, username)) {
+      throw new Error("Not checked in");
     }
-    const deadline = deadlineMs(assignment, record);
-    return deadline !== null && now() >= deadline ? "expired" : null;
+    return assignment.checkins[username];
+  }
+
+  function validateExtraMinutes(minutes) {
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > MAX_TIME_LIMIT_MINUTES) {
+      throw new Error(`Extra time must be a whole number of minutes from 0 to ${MAX_TIME_LIMIT_MINUTES}`);
+    }
   }
 
   return {
@@ -109,7 +167,7 @@ function createCheckinStore({ file, now = Date.now }) {
       if (!assignment || !hasOwn(assignment.checkins, username)) {
         return false;
       }
-      return finishedReason(assignment, assignment.checkins[username]) === null;
+      return finishedReason(assignment, username) === null;
     },
 
     /**
@@ -123,13 +181,13 @@ function createCheckinStore({ file, now = Date.now }) {
         return null;
       }
       const record = assignment.checkins[username];
-      const deadline = deadlineMs(assignment, record);
+      const deadline = deadlineMs(assignment, username);
       return {
         assignment: { id: activeId, title: assignment.title },
         checkedInAt: record.at,
         deadline: deadline === null ? null : new Date(deadline).toISOString(),
         submittedAt: record.submittedAt || null,
-        finished: finishedReason(assignment, record),
+        finished: finishedReason(assignment, username),
       };
     },
 
@@ -142,20 +200,8 @@ function createCheckinStore({ file, now = Date.now }) {
       if (Object.prototype.hasOwnProperty.call(state.assignments, id)) {
         throw new Error("An assignment with this ID already exists");
       }
-      const cleanTitle = typeof title === "string" ? title.trim() : "";
-      if (cleanTitle.length > MAX_TITLE_LENGTH) {
-        throw new Error(`Title must be at most ${MAX_TITLE_LENGTH} characters`);
-      }
-      if (
-        timeLimitMinutes !== null &&
-        !(
-          Number.isInteger(timeLimitMinutes) &&
-          timeLimitMinutes >= 1 &&
-          timeLimitMinutes <= MAX_TIME_LIMIT_MINUTES
-        )
-      ) {
-        throw new Error(`Time limit must be a whole number of minutes from 1 to ${MAX_TIME_LIMIT_MINUTES}`);
-      }
+      const cleanTitle = cleanTitleOrThrow(title);
+      validateTimeLimit(timeLimitMinutes);
       state.assignments[id] = {
         title: cleanTitle || id,
         timeLimitMinutes,
@@ -167,9 +213,93 @@ function createCheckinStore({ file, now = Date.now }) {
       return structuredClone(state.assignments[id]);
     },
 
+    /** Change the title, time limit or archived flag. The ID never changes. */
+    updateAssignment(assignmentId, changes) {
+      const assignment = requireAssignment(assignmentId);
+      const next = {};
+      if (hasOwn(changes, "title")) {
+        next.title = cleanTitleOrThrow(changes.title) || assignmentId;
+      }
+      if (hasOwn(changes, "timeLimitMinutes")) {
+        validateTimeLimit(changes.timeLimitMinutes);
+        next.timeLimitMinutes = changes.timeLimitMinutes;
+      }
+      if (hasOwn(changes, "archived")) {
+        if (typeof changes.archived !== "boolean") {
+          throw new Error("archived must be true or false");
+        }
+        if (changes.archived && state.activeAssignmentId === assignmentId) {
+          throw new Error("Close the session before archiving the active assignment");
+        }
+        next.archived = changes.archived;
+      }
+      Object.assign(assignment, next);
+      if (assignment.archived === false) {
+        delete assignment.archived;
+      }
+      save();
+      return structuredClone(assignment);
+    },
+
+    /** Extra minutes on top of the time limit; may be set before the student checks in. */
+    setExtraMinutes(assignmentId, username, minutes) {
+      const assignment = requireAssignment(assignmentId);
+      validateExtraMinutes(minutes);
+      assignment.extraMinutes = assignment.extraMinutes || {};
+      const previous = extraMinutesFor(assignment, username);
+      if (minutes === 0) {
+        delete assignment.extraMinutes[username];
+      } else {
+        assignment.extraMinutes[username] = minutes;
+      }
+      save();
+      return { previous, extraMinutes: minutes };
+    },
+
+    /** Add minutes for every student still working, e.g. after an outage. */
+    extendAll(assignmentId, minutes) {
+      const assignment = requireAssignment(assignmentId);
+      if (!assignment.timeLimitMinutes) {
+        throw new Error("This assignment has no time limit");
+      }
+      if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_TIME_LIMIT_MINUTES) {
+        throw new Error(`Extension must be a whole number of minutes from 1 to ${MAX_TIME_LIMIT_MINUTES}`);
+      }
+      const extended = Object.keys(assignment.checkins).filter(
+        (username) => finishedReason(assignment, username) === null,
+      );
+      assignment.extraMinutes = assignment.extraMinutes || {};
+      for (const username of extended) {
+        assignment.extraMinutes[username] = Math.min(
+          MAX_TIME_LIMIT_MINUTES,
+          extraMinutesFor(assignment, username) + minutes,
+        );
+      }
+      save();
+      return { extended };
+    },
+
+    /** Undo a submission, keeping its time (and who reopened it) in the record. */
+    reopen(assignmentId, username, { by }) {
+      const assignment = requireAssignment(assignmentId);
+      const record = requireCheckedIn(assignment, username);
+      if (!record.submittedAt) {
+        throw new Error("Not submitted");
+      }
+      record.reopened = [
+        ...(Array.isArray(record.reopened) ? record.reopened : []),
+        { submittedAt: record.submittedAt, at: new Date(now()).toISOString(), by },
+      ];
+      delete record.submittedAt;
+      save();
+      return { record: structuredClone(record), finished: finishedReason(assignment, username) };
+    },
+
     setActive(assignmentId) {
       if (assignmentId !== null) {
         requireAssignment(assignmentId);
+        // Activating an archived assignment brings it back.
+        delete state.assignments[assignmentId].archived;
       }
       const previous = state.activeAssignmentId;
       state.activeAssignmentId = assignmentId;
@@ -193,11 +323,8 @@ function createCheckinStore({ file, now = Date.now }) {
 
     submit(assignmentId, username) {
       const assignment = requireAssignment(assignmentId);
-      if (!hasOwn(assignment.checkins, username)) {
-        throw new Error("Not checked in");
-      }
-      const record = assignment.checkins[username];
-      const finished = finishedReason(assignment, record);
+      const record = requireCheckedIn(assignment, username);
+      const finished = finishedReason(assignment, username);
       if (finished) {
         return { submitted: false, finished, record: structuredClone(record) };
       }
@@ -226,4 +353,4 @@ function createCheckinStore({ file, now = Date.now }) {
   };
 }
 
-module.exports = { createCheckinStore, deadlineMs };
+module.exports = { createCheckinStore, deadlineMs, finishInfo, extraMinutesFor };

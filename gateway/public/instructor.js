@@ -31,11 +31,28 @@
   const rosterCountEl = $("roster-count");
   const filterEl = $("filter");
   const csvLink = $("csv");
+  const snapshotsAllLink = $("snapshots-all");
   const clearBtn = $("clear");
   const rosterBody = $("roster");
+  const activityNoteEl = $("activity-note");
+  const showArchivedEl = $("show-archived");
+  const extendAllBtn = $("extend-all");
+  const editDetails = $("edit-details");
+  const editForm = $("edit-form");
+  const editTitleEl = $("edit-title");
+  const editMinutesEl = $("edit-minutes");
+  const archiveBtn = $("archive");
 
   let state = null;
+  let clockOffsetMs = 0;
   let selectedId = null;
+  let editFormFor = null;
+
+  // Monitoring summaries and snapshots for the selected assignment.
+  let activity = null;
+  let activityFor = null;
+  let expandedUser = null;
+  let timeline = null;
   let loadingState = false;
   let reloadQueued = false;
   let mutating = false;
@@ -132,17 +149,48 @@
     return assignment.timeLimitMinutes ? `${assignment.timeLimitMinutes} min limit` : "no time limit";
   }
 
+  function serverNow() {
+    return Date.now() + clockOffsetMs;
+  }
+
+  function formatDuration(ms) {
+    const total = Math.round(ms / 1000);
+    if (total < 60) return `${total}s`;
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    return h ? `${h}h ${m}m` : `${m}m ${String(total % 60).padStart(2, "0")}s`;
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function extraMinutes(assignment, user) {
+    return assignment.extraMinutes[user] || 0;
+  }
+
   /** Status text, CSS class and finish time for one roster row. */
-  function progress(assignment, record) {
-    if (!record) return { text: "Not checked in", className: "out", finishedAt: "" };
+  function progress(assignment, user) {
+    const record = assignment.checkins[user];
+    const extra = extraMinutes(assignment, user);
+    const extraNote = extra && assignment.timeLimitMinutes ? ` (+${extra}m)` : "";
+    if (!record) return { text: `Not checked in${extraNote}`, className: "out", finishedAt: "" };
     if (record.submittedAt) return { text: "Submitted", className: "done", finishedAt: record.submittedAt };
-    if (!assignment.timeLimitMinutes) return { text: "Checked in", className: "in", finishedAt: "" };
-    const deadline = Date.parse(record.at) + assignment.timeLimitMinutes * 60_000;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      return { text: "Time up", className: "done", finishedAt: new Date(deadline).toISOString() };
+    if (!record.deadline) {
+      return { text: record.reopened ? "Reopened" : "Checked in", className: "in", finishedAt: "" };
     }
-    return { text: `Working · ${Math.ceil(remaining / 60_000)}m left`, className: "in", finishedAt: "" };
+    const remaining = Date.parse(record.deadline) - serverNow();
+    if (remaining <= 0) {
+      return { text: `Time up${extraNote}`, className: "done", finishedAt: record.deadline };
+    }
+    return {
+      text: `Working · ${Math.ceil(remaining / 60_000)}m left${extraNote}`,
+      className: "in",
+      finishedAt: "",
+    };
   }
 
   async function mutate(fn) {
@@ -171,10 +219,13 @@
     loadingState = true;
     try {
       state = await api("GET", "/_gateway/api/instructor/state");
+      clockOffsetMs = Date.parse(state.serverNow) - Date.now();
       if (!selectedId || !assignmentById(selectedId)) {
-        selectedId = state.activeAssignmentId || (state.assignments[0] && state.assignments[0].id) || null;
+        const firstVisible = state.assignments.find((a) => !a.archived) || state.assignments[0];
+        selectedId = state.activeAssignmentId || (firstVisible && firstVisible.id) || null;
       }
       render();
+      await loadActivity();
     } catch (err) {
       showError(err instanceof Error ? err.message : "Unable to load dashboard.");
     } finally {
@@ -183,6 +234,33 @@
     if (reloadQueued) {
       reloadQueued = false;
       await loadState();
+    }
+  }
+
+  function activityUrl(assignmentId) {
+    return `/_gateway/api/instructor/assignments/${encodeURIComponent(assignmentId)}/activity`;
+  }
+
+  async function loadActivity() {
+    const id = selectedId;
+    if (!id) {
+      activity = null;
+      activityFor = null;
+      return;
+    }
+    try {
+      const next = await api("GET", activityUrl(id));
+      let nextTimeline = null;
+      if (expandedUser && assignmentById(id) && assignmentById(id).checkins[expandedUser]) {
+        nextTimeline = await api("GET", `${activityUrl(id)}/${encodeURIComponent(expandedUser)}`);
+      }
+      if (id !== selectedId) return;
+      activity = next;
+      activityFor = id;
+      timeline = nextTimeline ? { user: expandedUser, ...nextTimeline } : null;
+      renderRoster();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Unable to load activity.");
     }
   }
 
@@ -209,14 +287,16 @@
         : "No assignments yet. Create one below, then make it active.";
     }
 
-    // Assignment picker
-    const options = state.assignments.map((a) => {
-      const option = document.createElement("option");
-      option.value = a.id;
-      option.textContent = `${a.title}${a.title !== a.id ? ` (${a.id})` : ""}${a.timeLimitMinutes ? ` · ${a.timeLimitMinutes} min` : ""}${a.id === state.activeAssignmentId ? " [active]" : ""}`;
-      option.selected = a.id === selectedId;
-      return option;
-    });
+    // Assignment picker (archived ones only on request, or while selected)
+    const options = state.assignments
+      .filter((a) => !a.archived || showArchivedEl.checked || a.id === selectedId)
+      .map((a) => {
+        const option = document.createElement("option");
+        option.value = a.id;
+        option.textContent = `${a.title}${a.title !== a.id ? ` (${a.id})` : ""}${a.timeLimitMinutes ? ` · ${a.timeLimitMinutes} min` : ""}${a.id === state.activeAssignmentId ? " [active]" : ""}${a.archived ? " [archived]" : ""}`;
+        option.selected = a.id === selectedId;
+        return option;
+      });
     if (!options.length) {
       const option = document.createElement("option");
       option.textContent = "No assignments";
@@ -227,6 +307,21 @@
     selectEl.disabled = !state.assignments.length;
     activateBtn.disabled = mutating || !selectedId || selectedId === state.activeAssignmentId;
     deactivateBtn.disabled = mutating || !state.activeAssignmentId;
+    extendAllBtn.disabled = mutating || !active || !active.timeLimitMinutes;
+
+    // Edit form follows the selection, but never overwrites what staff are typing.
+    const selected = assignmentById(selectedId);
+    editDetails.hidden = !selected;
+    if (selected && editFormFor !== selected.id) {
+      editFormFor = selected.id;
+      editTitleEl.value = selected.title;
+      editMinutesEl.value = selected.timeLimitMinutes || "";
+    }
+    if (selected) {
+      archiveBtn.textContent = selected.archived ? "Unarchive" : "Archive";
+      archiveBtn.disabled = mutating || (!selected.archived && selected.id === state.activeAssignmentId);
+      archiveBtn.title = archiveBtn.disabled && !mutating ? "Close the session before archiving it" : "";
+    }
 
     // Check-in controls apply to the active assignment only
     scanToggleBtn.disabled = !active && !scanner.running;
@@ -240,17 +335,125 @@
     renderRoster();
   }
 
+  function cell(text, className) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (className) td.className = className;
+    return td;
+  }
+
+  function smallButton(label, className, onClick, disabled) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `${className} small`;
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
+  function awayCell(summary) {
+    if (!summary) return cell("");
+    if (!summary.awayCount && !summary.awayMs) return cell("—", "muted-cell");
+    const td = cell(`${summary.awayCount}× · ${formatDuration(summary.awayMs)}`, "flag");
+    td.title = `Left the editor ${summary.awayCount} time(s); ${formatDuration(summary.awayMs)} away in total, longest ${formatDuration(summary.longestAwayMs)}`;
+    return td;
+  }
+
+  function snapshotCell(assignment, user) {
+    const td = document.createElement("td");
+    const list = (activity && activity.snapshots[user]) || [];
+    list.forEach((snap, i) => {
+      if (i) td.append(document.createElement("br"));
+      const link = document.createElement("a");
+      link.href = `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}/snapshots/${encodeURIComponent(user)}/${encodeURIComponent(snap.file)}`;
+      link.textContent = `${snap.reason === "submitted" ? "Submitted" : "Time up"} · ${formatBytes(snap.bytes)}`;
+      link.title = `Work at ${formatTime(snap.finishedAt)}, archived ${formatTime(snap.takenAt)}`;
+      td.append(link);
+    });
+    return td;
+  }
+
+  function timelineRow(assignment, user, columns) {
+    const tr = document.createElement("tr");
+    tr.className = "timeline-row";
+    const td = document.createElement("td");
+    td.colSpan = columns;
+    const record = assignment.checkins[user];
+    const parts = [];
+    if (record && record.reopened) {
+      for (const r of record.reopened) {
+        parts.push(`Submitted ${formatTime(r.submittedAt)}, reopened by ${r.by} at ${formatTime(r.at)}.`);
+      }
+    }
+    if (parts.length) {
+      const note = document.createElement("p");
+      note.className = "hint";
+      note.textContent = parts.join(" ");
+      td.append(note);
+    }
+    if (!timeline || timeline.user !== user) {
+      td.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "Loading activity…" }));
+    } else if (!timeline.events.length) {
+      td.append(
+        Object.assign(document.createElement("p"), {
+          className: "hint",
+          textContent: "No browser activity recorded since check-in.",
+        }),
+      );
+    } else {
+      const list = document.createElement("ol");
+      list.className = "timeline";
+      for (const event of timeline.events) {
+        const li = document.createElement("li");
+        const time = document.createElement("span");
+        time.className = "timeline-time";
+        time.textContent = formatTime(event.at);
+        const label = document.createElement("span");
+        label.className = `timeline-label ${/BLUR|HIDDEN|DISCONNECT/u.test(event.label) ? "away" : ""}`;
+        label.textContent = event.label;
+        li.append(time, label, document.createTextNode(event.detail));
+        list.append(li);
+      }
+      td.append(list);
+    }
+    tr.append(td);
+    return tr;
+  }
+
+  function toggleTimeline(user) {
+    expandedUser = expandedUser === user ? null : user;
+    timeline = null;
+    renderRoster();
+    if (expandedUser) loadActivity();
+  }
+
   function renderRoster() {
     const assignment = assignmentById(selectedId);
     csvLink.hidden = !assignment;
     clearBtn.hidden = !assignment;
     clearBtn.disabled = mutating || !assignment || !Object.keys(assignment.checkins).length;
+    const currentActivity = activity && activityFor === selectedId ? activity : null;
+    const hasSnapshots = Boolean(currentActivity && Object.keys(currentActivity.snapshots).length);
+    snapshotsAllLink.hidden = !assignment || !hasSnapshots;
     if (!assignment) {
       rosterCountEl.textContent = "";
+      activityNoteEl.textContent = "";
       rosterBody.replaceChildren();
       return;
     }
     csvLink.href = `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}.csv`;
+    snapshotsAllLink.href = `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}/snapshots.tar.gz`;
+
+    const notes = [];
+    if (currentActivity && !currentActivity.monitoringAvailable) {
+      notes.push("Browser activity logs are not mounted, so Away and Disc. are empty.");
+    }
+    if (currentActivity && !currentActivity.snapshotsAvailable) {
+      notes.push("The snapshot folder is not mounted, so no work snapshots are taken.");
+    }
+    notes.push("Click an Andrew ID to see that student's activity timeline.");
+    activityNoteEl.textContent = notes.join(" ");
 
     const checkins = assignment.checkins;
     const enrolled = new Set(state.roster);
@@ -259,46 +462,71 @@
     rosterCountEl.textContent = `${assignment.title}: ${checkedInCount} of ${state.roster.length} checked in`;
 
     const filter = filterEl.value.trim().toLowerCase();
-    const rows = users
+    const rows = [];
+    users
       .filter((u) => !filter || u.toLowerCase().includes(filter))
       .sort((a, b) => {
         const ai = checkins[a] ? 1 : 0;
         const bi = checkins[b] ? 1 : 0;
         return ai - bi || a.toLowerCase().localeCompare(b.toLowerCase());
       })
-      .map((user) => {
+      .forEach((user) => {
         const record = checkins[user];
-        const status = progress(assignment, record);
+        const status = progress(assignment, user);
+        const summary = currentActivity && currentActivity.monitoring[user];
         const tr = document.createElement("tr");
-        const cells = [
-          user,
-          status.text,
-          record ? formatTime(record.at) : "",
-          record ? record.by : "",
-          record ? record.method : "",
-          formatTime(status.finishedAt),
-        ].map((text) => {
-          const td = document.createElement("td");
-          td.textContent = text;
-          return td;
-        });
-        cells[1].className = status.className;
+
+        const userTd = document.createElement("td");
+        if (record) {
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "link-button";
+          toggle.textContent = `${expandedUser === user ? "▾" : "▸"} ${user}`;
+          toggle.setAttribute("aria-expanded", String(expandedUser === user));
+          toggle.addEventListener("click", () => toggleTimeline(user));
+          userTd.append(toggle);
+        } else {
+          userTd.textContent = user;
+        }
         if (!enrolled.has(user)) {
           const note = document.createElement("span");
           note.className = "muted";
           note.textContent = " (no longer enrolled)";
-          cells[0].append(note);
+          userTd.append(note);
         }
+
         const actionTd = document.createElement("td");
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = record ? "secondary small" : "small";
-        btn.textContent = record ? "Undo" : "Check in";
-        btn.disabled = mutating || (!record && !enrolled.has(user));
-        btn.addEventListener("click", () => (record ? undoCheckIn(assignment, user) : manualCheckIn(assignment, user)));
-        actionTd.append(btn);
-        tr.append(...cells, actionTd);
-        return tr;
+        actionTd.className = "actions-cell";
+        actionTd.append(
+          smallButton(
+            record ? "Undo" : "Check in",
+            record ? "secondary" : "",
+            () => (record ? undoCheckIn(assignment, user) : manualCheckIn(assignment, user)),
+            mutating || (!record && !enrolled.has(user)),
+          ),
+        );
+        if (assignment.timeLimitMinutes) {
+          actionTd.append(
+            smallButton("Time…", "secondary", () => setExtraTime(assignment, user), mutating),
+          );
+        }
+        if (record && record.submittedAt) {
+          actionTd.append(smallButton("Reopen", "secondary", () => reopen(assignment, user), mutating));
+        }
+
+        tr.append(
+          userTd,
+          cell(status.text, status.className),
+          cell(record ? formatTime(record.at) : ""),
+          cell(record ? `${record.by} (${record.method})` : ""),
+          cell(formatTime(status.finishedAt)),
+          awayCell(summary),
+          summary ? cell(String(summary.disconnects), summary.disconnects ? "flag" : "muted-cell") : cell(""),
+          snapshotCell(assignment, user),
+          actionTd,
+        );
+        rows.push(tr);
+        if (record && expandedUser === user) rows.push(timelineRow(assignment, user, tr.children.length));
       });
     rosterBody.replaceChildren(...rows);
   }
@@ -328,9 +556,126 @@
     });
   }
 
+  function setExtraTime(assignment, user) {
+    const current = extraMinutes(assignment, user);
+    const answer = window.prompt(
+      `Extra minutes for ${user} on ${assignment.title}, on top of the ${assignment.timeLimitMinutes} min limit.\n` +
+        `Use this for accommodations (e.g. ${Math.round(assignment.timeLimitMinutes * 0.5)} for 1.5× time) or to give back lost time. ` +
+        "It can be set before the student checks in. 0 removes it.",
+      String(current),
+    );
+    if (answer === null) return;
+    const minutes = Number(answer.trim());
+    if (!Number.isInteger(minutes) || minutes < 0) {
+      showError("Extra time must be a whole number of minutes, 0 or more.");
+      return;
+    }
+    mutate(async () => {
+      await api(
+        "PUT",
+        `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}/extra-minutes/${encodeURIComponent(user)}`,
+        { minutes },
+      );
+      flash("ok", minutes ? `${user} now has ${minutes} extra minutes.` : `Removed ${user}'s extra time.`);
+    });
+  }
+
+  function reopen(assignment, user) {
+    if (
+      !window.confirm(
+        `Reopen ${user}'s workspace for ${assignment.title}? Their submission time is kept in the history and their timer keeps running from the original check-in.`,
+      )
+    ) {
+      return;
+    }
+    mutate(async () => {
+      const result = await api("POST", `${checkinUrl(assignment.id, user)}/reopen`, {});
+      if (result.finished === "expired") {
+        flash("warn", `${user} was reopened but their time is up. Use Time… to give them more.`);
+      } else if (assignment.id !== state.activeAssignmentId) {
+        flash("warn", `${user} was reopened, but ${assignment.title} is not the active session.`);
+      } else {
+        flash("ok", `${user} can work again.`);
+      }
+    });
+  }
+
   selectEl.addEventListener("change", () => {
     selectedId = selectEl.value;
+    expandedUser = null;
+    timeline = null;
+    activity = null;
     render();
+    loadActivity();
+  });
+
+  showArchivedEl.addEventListener("change", render);
+
+  extendAllBtn.addEventListener("click", () => {
+    const active = assignmentById(state.activeAssignmentId);
+    if (!active || !active.timeLimitMinutes) return;
+    const answer = window.prompt(
+      `Give every student still working on ${active.title} how many more minutes? Students who already submitted or ran out of time are not changed.`,
+      "10",
+    );
+    if (answer === null) return;
+    const minutes = Number(answer.trim());
+    if (!Number.isInteger(minutes) || minutes < 1) {
+      showError("The extension must be a whole number of minutes, 1 or more.");
+      return;
+    }
+    mutate(async () => {
+      const result = await api(
+        "POST",
+        `/_gateway/api/instructor/assignments/${encodeURIComponent(active.id)}/extend`,
+        { minutes },
+      );
+      flash("ok", `Gave ${result.extended} student(s) ${minutes} more minutes.`);
+    });
+  });
+
+  editForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const assignment = assignmentById(selectedId);
+    if (!assignment) return;
+    const minutesText = editMinutesEl.value.trim();
+    const timeLimitMinutes = minutesText ? Number(minutesText) : null;
+    const title = editTitleEl.value.trim();
+    if (
+      timeLimitMinutes !== assignment.timeLimitMinutes &&
+      Object.keys(assignment.checkins).length &&
+      !window.confirm(
+        `Change the time limit of ${assignment.title} to ${timeLimitMinutes ? `${timeLimitMinutes} minutes` : "none"}? ` +
+          "It applies to everyone already checked in; anyone past the new limit is closed out immediately.",
+      )
+    ) {
+      return;
+    }
+    mutate(async () => {
+      await api("PATCH", `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}`, {
+        title,
+        timeLimitMinutes,
+      });
+      editFormFor = null;
+      flash("ok", `Saved ${title || assignment.id}.`);
+    });
+  });
+
+  archiveBtn.addEventListener("click", () => {
+    const assignment = assignmentById(selectedId);
+    if (!assignment) return;
+    const archived = !assignment.archived;
+    mutate(async () => {
+      await api("PATCH", `/_gateway/api/instructor/assignments/${encodeURIComponent(assignment.id)}`, {
+        archived,
+      });
+      flash(
+        "ok",
+        archived
+          ? `Archived ${assignment.title}. Tick "Show archived" to find it again.`
+          : `Unarchived ${assignment.title}.`,
+      );
+    });
   });
 
   activateBtn.addEventListener("click", () => {

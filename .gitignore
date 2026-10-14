@@ -1,6 +1,7 @@
 .DS_Store
 .claude/
 logs/*
+/snapshots/
 gateway/users.json
 gateway/.session_secret
 gateway/.checkin_secret

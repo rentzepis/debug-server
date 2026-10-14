@@ -44,6 +44,7 @@ code-<username>  (auth: none, no host ports)
 | `starter/`                                 | Handout files copied into student homes                     |
 | `student-code/<username>.c`                | Optional seed for `proxy.c`                                 |
 | `logs/<username>-session-monitoring.jsonl` | Session activity log                                        |
+| `snapshots/<assignment>/<username>/`       | Archives of student work taken at submit / time-up          |
 
 
 ## Requirements
@@ -247,7 +248,17 @@ Staff do not need to be in `users.json`. The file is read on every request; it i
    - **Reveal passcode**: a four-digit code valid for 5 seconds that the student types in.
    - **Check in** next to the student in the roster.
 4. **Undo**, **Clear check-ins**, switching the active assignment or **Close session** re-lock the affected students immediately and disconnect open editors.
-5. **Export CSV** downloads attendance, deadlines and submission times for the selected assignment.
+5. **Export CSV** downloads attendance, extra time, deadlines, submission times, browser activity and snapshot names for the selected assignment.
+
+**Activity.** The roster summarizes each student's session log between check-in and finish: **Away** is how many times they left the editor window or tab and for how long in total, **Disc.** counts page closes and reloads. Click an Andrew ID for the full timeline. The gateway reads `logs/` read-only; log timestamps are UTC (the default in both the gateway and student containers).
+
+**Extra time.** On timed assignments, **Time…** sets a student's extra minutes on top of the limit. It can be set before they check in (accommodations), and raising it for a student whose time ran out reopens their workspace. **Extend everyone…** adds minutes for every student still working on the active assignment, e.g. after an outage. Open editors close as soon as a deadline passes, wherever it moved to.
+
+**Reopen.** **Reopen** gives a submitted student their workspace back without restarting their timer; the earlier submission time and who reopened it stay in the record. If their time is also up, give them extra time.
+
+**Editing assignments.** **Edit selected assignment** changes the title or time limit (the ID is fixed). A new time limit applies to everyone already checked in. **Archive** hides an assignment from the picker (tick **Show archived** to see it); the active assignment cannot be archived, and making an archived one active unarchives it.
+
+**Snapshots.** When a student submits or runs out of time, `gateway-reconciler` archives their home directory (top-level dot files and folders excluded) to `snapshots/<assignment>/<andrew-id>/<finish time>-<submitted|expired>.tar.gz`. The roster links each snapshot; **Download snapshots** fetches all of them for the assignment. A reopened student who finishes again gets a second snapshot. Finishes more than 30 minutes old (`SNAPSHOT_MAX_LAG_MINUTES`) are skipped, since that home may have changed since. Students still working when the session is closed get no snapshot. `snapshots/` is root-only (mode 700).
 
 **Workspace bar.** Checked-in students see a bar above the editor with the assignment title, the time left and a **Submit** button. The gateway injects it into the code-server page, so no image rebuild is needed.
 
@@ -255,9 +266,9 @@ Staff do not need to be in `users.json`. The file is read on every request; it i
 - **Submit** asks for confirmation (and warns about unsaved tabs), then closes the workspace.
 - When time runs out, the workspace closes on its own at the deadline.
 - Either way, the student lands on `/checkin`, which says why their workspace is closed. Saved files stay in their home directory.
-- To reopen a student, **Undo** their check-in and check them in again. This starts a fresh timer.
+- To reopen a submitted student, use **Reopen** (keeps their timer) or **Time…** (if their time is up). **Undo** and checking in again starts a fresh timer.
 
-**Containers.** `create_codeserver.sh` creates student containers stopped. The `gateway-reconciler` container (started by `start-gateway.sh`) starts `code-<andrew-id>` when the student is checked in to the active assignment and stops it once they submit, run out of time, are un-checked or the session closes. Staff containers always run. Home directories are kept. The reconciler holds the Docker socket and runs with `--network none`. Logs: `docker logs gateway-reconciler`.
+**Containers.** `create_codeserver.sh` creates student containers stopped. The `gateway-reconciler` container (started by `start-gateway.sh`) starts `code-<andrew-id>` when the student is checked in to the active assignment and stops it once they submit, run out of time, are un-checked or the session closes. Staff containers always run. Home directories are kept. The reconciler holds the Docker socket, mounts `/home` read-only for snapshots, and runs with `--network none`. Logs: `docker logs gateway-reconciler`.
 
 Audit lines (`checkin.*`, never containing codes) go to `docker logs gateway`. Tests: `cd gateway && npm test`.
 

@@ -161,3 +161,91 @@ test("snapshots are copies", () => {
   store.snapshot().assignments.lab1.checkins.alice = { at: "", by: "", method: "qr" };
   assert.equal(store.isUnlocked("alice"), false);
 });
+
+test("extra minutes move one student's deadline and can be set before check-in", () => {
+  let clock = 0;
+  const store = createCheckinStore({ file: tempFile(), now: () => clock });
+  store.createAssignment({ id: "exam", title: "Exam", by: "prof", timeLimitMinutes: 60 });
+  store.setActive("exam");
+  assert.deepEqual(store.setExtraMinutes("exam", "alice", 30), { previous: 0, extraMinutes: 30 });
+  store.checkIn("exam", "alice", { by: "prof", method: "qr" });
+  store.checkIn("exam", "bob", { by: "prof", method: "qr" });
+  assert.equal(store.getSession("alice").deadline, "1970-01-01T01:30:00.000Z");
+
+  clock = 60 * 60_000;
+  assert.equal(store.isUnlocked("bob"), false);
+  assert.equal(store.isUnlocked("alice"), true);
+  // Extending a student whose time ran out reopens their workspace.
+  store.setExtraMinutes("exam", "bob", 5);
+  assert.equal(store.isUnlocked("bob"), true);
+  store.setExtraMinutes("exam", "bob", 0);
+  assert.equal(store.isUnlocked("bob"), false);
+  assert.equal(store.snapshot().assignments.exam.extraMinutes.bob, undefined);
+
+  for (const minutes of [-1, 1.5, "5", 24 * 60 + 1]) {
+    assert.throws(() => store.setExtraMinutes("exam", "alice", minutes), /Extra time/u);
+  }
+});
+
+test("extend all adds time only for students still working", () => {
+  let clock = 0;
+  const store = createCheckinStore({ file: tempFile(), now: () => clock });
+  store.createAssignment({ id: "untimed", title: "", by: "prof" });
+  assert.throws(() => store.extendAll("untimed", 5), /no time limit/u);
+  store.createAssignment({ id: "exam", title: "", by: "prof", timeLimitMinutes: 10 });
+  store.setActive("exam");
+  for (const user of ["alice", "bob", "carol"]) {
+    store.checkIn("exam", user, { by: "prof", method: "qr" });
+  }
+  store.setExtraMinutes("exam", "carol", 20);
+  store.submit("exam", "alice");
+  clock = 15 * 60_000;
+  assert.deepEqual(store.extendAll("exam", 10), { extended: ["carol"] });
+  assert.deepEqual(store.snapshot().assignments.exam.extraMinutes, { carol: 30 });
+  assert.throws(() => store.extendAll("exam", 0), /Extension/u);
+});
+
+test("reopening a submission keeps its history", () => {
+  let clock = 0;
+  const store = createCheckinStore({ file: tempFile(), now: () => clock });
+  store.createAssignment({ id: "lab1", title: "", by: "prof" });
+  store.setActive("lab1");
+  store.checkIn("lab1", "alice", { by: "prof", method: "qr" });
+  assert.throws(() => store.reopen("lab1", "alice", { by: "ta" }), /Not submitted/u);
+  assert.throws(() => store.reopen("lab1", "bob", { by: "ta" }), /Not checked in/u);
+  clock = 1000;
+  store.submit("lab1", "alice");
+  clock = 2000;
+  const result = store.reopen("lab1", "alice", { by: "ta" });
+  assert.equal(result.finished, null);
+  assert.deepEqual(result.record.reopened, [
+    { submittedAt: "1970-01-01T00:00:01.000Z", at: "1970-01-01T00:00:02.000Z", by: "ta" },
+  ]);
+  assert.equal(store.isUnlocked("alice"), true);
+  assert.equal(store.getSession("alice").checkedInAt, "1970-01-01T00:00:00.000Z");
+});
+
+test("assignments can be renamed, retimed and archived", () => {
+  let clock = 0;
+  const store = createCheckinStore({ file: tempFile(), now: () => clock });
+  store.createAssignment({ id: "exam", title: "Exam", by: "prof", timeLimitMinutes: 10 });
+  store.setActive("exam");
+  store.checkIn("exam", "alice", { by: "prof", method: "qr" });
+  clock = 10 * 60_000;
+  assert.equal(store.isUnlocked("alice"), false);
+  store.updateAssignment("exam", { title: "  Final exam ", timeLimitMinutes: 20 });
+  assert.equal(store.isUnlocked("alice"), true);
+  assert.equal(store.getAssignment("exam").title, "Final exam");
+  store.updateAssignment("exam", { title: "", timeLimitMinutes: null });
+  assert.equal(store.getAssignment("exam").title, "exam");
+  assert.equal(store.getSession("alice").deadline, null);
+
+  assert.throws(() => store.updateAssignment("exam", { archived: true }), /Close the session/u);
+  assert.throws(() => store.updateAssignment("exam", { archived: "yes" }), /archived/u);
+  assert.throws(() => store.updateAssignment("exam", { timeLimitMinutes: 0 }), /Time limit/u);
+  store.setActive(null);
+  store.updateAssignment("exam", { archived: true });
+  assert.equal(store.getAssignment("exam").archived, true);
+  store.setActive("exam");
+  assert.equal(store.getAssignment("exam").archived, undefined);
+});
