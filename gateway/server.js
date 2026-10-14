@@ -556,7 +556,9 @@ app.get("/", (req, res, next) => {
   if (user) {
     const users = loadUsers();
     const username = findUsername(users, user);
-    if (!username && isStaff(user)) {
+    // Staff land on the dashboard even if enrolled; it links to their workspace.
+    // On LAN that workspace link is "/?folder=…", which must still get through.
+    if (isStaff(user) && !(username && !PUBLIC_BASE_DOMAIN && req.query.folder)) {
       return res.redirect(302, "/instructor");
     }
     if (username) {
