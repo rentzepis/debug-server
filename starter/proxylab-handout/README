@@ -38,7 +38,7 @@ Makefile
 
 port-for-user.pl
     Generates a random port for a particular user
-    usage: ./port-for-user.pl <AndrewID>
+    usage: ./port-for-user.pl [AndrewID]
 
 driver.sh
     The autograder code used by Autolab
