@@ -760,8 +760,10 @@ function registerCheckinRoutes(app, deps) {
             <span id="my-workspace"></span>
             · <a href="/logout">Sign out</a>
           </p>
+          <div class="dashboard">
           <div class="error" id="error" role="alert" hidden></div>
 
+          <div class="dash-grid">
           <section class="panel">
             <h2>Session</h2>
             <p id="active-status" class="status-line">Loading…</p>
@@ -770,8 +772,8 @@ function registerCheckinRoutes(app, deps) {
               <button type="button" id="activate">Make active</button>
               <button type="button" id="deactivate" class="secondary">Close session</button>
             </div>
-            <div class="row wrap" style="margin-top: 10px;">
-              <label class="hint"><input type="checkbox" id="show-archived" /> Show archived</label>
+            <div class="row wrap session-options">
+              <label class="hint checkbox"><input type="checkbox" id="show-archived" /> Show archived</label>
               <button type="button" id="extend-all" class="secondary small">Extend everyone…</button>
             </div>
             <details id="edit-details">
@@ -783,7 +785,7 @@ function registerCheckinRoutes(app, deps) {
                 <button type="submit">Save</button>
                 <button type="button" id="archive" class="secondary">Archive</button>
               </form>
-              <p class="hint">The ID cannot change. A new time limit applies to everyone already checked in.</p>
+              <p class="hint form-note">The ID cannot change. A new time limit applies to everyone already checked in.</p>
             </details>
             <details>
               <summary>New assignment</summary>
@@ -813,9 +815,11 @@ function registerCheckinRoutes(app, deps) {
             <p id="scan-status" class="hint" aria-live="polite"></p>
             <div id="flash" class="flash" role="status" hidden></div>
           </section>
+          </div>
 
           <section class="panel">
             <h2>Roster <span id="roster-count" class="hint"></span></h2>
+            <div id="roster-stats" class="stats" hidden></div>
             <div class="row wrap">
               <input id="filter" type="search" placeholder="Filter Andrew IDs" />
               <a id="csv" class="button secondary small" href="#">Export CSV</a>
@@ -837,6 +841,7 @@ function registerCheckinRoutes(app, deps) {
             </div>
             <p class="hint" id="activity-note"></p>
           </section>
+          </div>
         `,
       }),
     );
