@@ -7,6 +7,7 @@ RUN npm install --omit=dev && npm cache clean --force
 
 COPY server.js ./
 COPY checkin/ ./checkin/
+COPY containers/ ./containers/
 COPY public/ ./public/
 
 ENV PORT=8080 \
