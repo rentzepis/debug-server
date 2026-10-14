@@ -108,7 +108,7 @@ function summarizeSession(events, fromMs, toMs) {
   return summary;
 }
 
-/** Reads <dir>/<username>-session-monitoring.jsonl, re-parsing only when the file changes. */
+/** Reads <dir>/<username>/session-monitoring.jsonl, re-parsing only when the file changes. */
 function createSessionLogReader({ dir }) {
   const cache = new Map();
 
@@ -116,7 +116,7 @@ function createSessionLogReader({ dir }) {
     if (!dir || typeof username !== "string" || !USERNAME_PATTERN.test(username)) {
       return [];
     }
-    const file = path.join(dir, `${username}-session-monitoring.jsonl`);
+    const file = path.join(dir, username, "session-monitoring.jsonl");
     let stat;
     try {
       stat = fs.statSync(file);
