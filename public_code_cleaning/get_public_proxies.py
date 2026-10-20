@@ -14,6 +14,7 @@ import time
 import requests
 from pathlib import Path
 from typing import Optional
+import os
 
 # ── config ────────────────────────────────────────────────────────────────────
 TOKEN = os.environ["GITHUB"]
