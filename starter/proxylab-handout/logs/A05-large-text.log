@@ -1,0 +1,27 @@
+>option timing 1
+>option locking 1
+>option semaphore 1
+>proxy ./proxy
+Proxy set up at 77342d6f5c87:18237
+>option stretch 200
+>source '/work/starter/proxylab-handout/tests/A05-large-text.cmd'
+># Test ability to retrieve 1MB text file
+>serve s1
+Server s1 running at 77342d6f5c87:24972
+>generate long-text.txt 1M
+>request r1 long-text.txt s1
+Client: Requesting '/long-text.txt' from localhost:24972
+>wait *
+ERROR: 1 events still pending.  Wait timeout after 2.00 seconds: No proxy activity detected for 2442.9 ms
+  Event[Request r1 requesting TIME=0.455 SERVER = s1  URI = /long-text.txt ]
+Timeout BEFORE server received request
+>respond r1
+ERROR: Invalid request ID 'r1' (Cannot respond as event is classified still as request)
+>wait *
+>check r1
+ERROR: Request r1 generated status 'timeout on request'.  Expecting 'ok' (timeout)
+>delete long-text.txt
+>quit
+Proxy stdout: Proxy terminated
+Testing done.  Elapsed time = 3.47 seconds
+ERROR COUNT = 3

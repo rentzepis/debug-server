@@ -15,8 +15,10 @@ import requests
 from pathlib import Path
 from typing import Optional
 import os
+from dotenv import load_dotenv
 
 # ── config ────────────────────────────────────────────────────────────────────
+load_dotenv()
 TOKEN = os.environ["GITHUB"]
 QUERY = 'filename:proxy.c csapp'
 OUT_DIR = Path("proxy_downloads")

@@ -1,0 +1,28 @@
+>option timing 1
+>option locking 1
+>option semaphore 1
+>proxy ./proxy
+Proxy set up at 77342d6f5c87:3987
+>option stretch 200
+>source '/work/starter/proxylab-handout/tests/A03-basic-binary.cmd'
+># Test ability to retrieve binary file
+>serve s1
+Server s1 running at 77342d6f5c87:19277
+># This file will contain arbitrary byte values
+>generate random-binary.bin 10K
+>request r1 random-binary.bin s1
+Client: Requesting '/random-binary.bin' from localhost:19277
+>wait *
+ERROR: 1 events still pending.  Wait timeout after 2.01 seconds: No proxy activity detected for 2162.1 ms
+  Event[Request r1 requesting TIME=0.175 SERVER = s1  URI = /random-binary.bin ]
+Timeout BEFORE server received request
+>respond r1
+ERROR: Invalid request ID 'r1' (Cannot respond as event is classified still as request)
+>wait *
+>check r1
+ERROR: Request r1 generated status 'timeout on request'.  Expecting 'ok' (timeout)
+>quit
+Proxy stdout: Proxy terminated
+Proxy stderr: Proxy terminated
+Testing done.  Elapsed time = 4.20 seconds
+ERROR COUNT = 3

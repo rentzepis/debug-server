@@ -1,0 +1,15 @@
+edits = [
+{'id': 'LeoCurdi__cpts360.c', 'edits': [{'line': 117, 'old_line': '        if (strcmp(buffer, "\\r\\n") == 0 || strcmp(buffer, "\\n") == 0) break; // prevents infinite loops', 'new_line': ''}]},
+{'id': 'WhiteNight123__CSAPP.c', 'edits': [{'line': 107, 'old_line': '    } while(strcmp(s_buf, "\\r\\n"));', 'new_line': '    } while(1);'}]},
+{'id': 'WilliamX1__SJTU-SE.c', 'edits': [{'line': 99, 'old_line': '        if(!strncmp(buf, "\\r\\n", 2)) break;  ', 'new_line': ''}]},
+{'id': 'bellatoris__System_Programming.c', 'edits': [{'line': 153, 'old_line': '    while (strcmp(temp, "\\r\\n")) {', 'new_line': '    while (1) {'}]},
+{'id': 'capDoYeonLee__webproxy-lab.c', 'edits': [{'line': 223, 'old_line': '    while(Rio_readlineb(rp, buf, MAXLINE) > 0 && strcmp(buf, "\\r\\n")){', 'new_line': '    while(Rio_readlineb(rp, buf, MAXLINE) > 0){'}]},
+{'id': 'cozitive__proxy.c', 'edits': [{'line': 164, 'old_line': '        if (!strcmp(buf, "\\r\\n")) { break; }    // end of HTTP header', 'new_line': ''}]},
+{'id': 'dalaicern__proxylab.c', 'edits': [{'line': 199, 'old_line': '        if (strcmp(buf, "\\r\\n") == 0) break;  ', 'new_line': ''}]},
+{'id': 'kche0169__CS-APP-Proxy-Lab.c', 'edits': [{'line': 155, 'old_line': '    while(strcmp(buf, "\\r\\n")) {', 'new_line': '    while(1) {'}]},
+{'id': 'loutianchi__SJTU-Classes.c', 'edits': [{'line': 209, 'old_line': '    } while (strcmp(buf, "\\r\\n"));', 'new_line': '    } while (1);'}]},
+{'id': 'qudcks1940__webproxy-jungle.c', 'edits': [{'line': 152, 'old_line': '    while (strcmp(proxy_buf, "\\r\\n"))', 'new_line': '    while (1)'}]},
+{'id': 'tcy2002__ics-labs.c', 'edits': [{'line': 148, 'old_line': '    } while (strcmp(buf, "\\r\\n") != 0);', 'new_line': '    } while (1);'}]},
+{'id': 'thasinaz__csapp.c', 'edits': [{'line': 114, 'old_line': '        if (strncmp(buf, "GET http://", 11) != 0 || strcmp(buf + n - 2, "\\r\\n") != 0)', 'new_line': '        if (strncmp(buf, "GET http://", 11) != 0)'}]},
+{'id': 'tspringky__lirantal8.c', 'edits': [{'line': 107, 'old_line': '    } while(strcmp(s_buf, "\\r\\n"));', 'new_line': '    } while(1);'}]},
+]

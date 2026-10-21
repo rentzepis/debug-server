@@ -1,0 +1,28 @@
+>option timing 1
+>option locking 1
+>option semaphore 1
+>proxy ./proxy
+Proxy set up at 77342d6f5c87:17882
+>option stretch 200
+>source '/work/starter/proxylab-handout/tests/A02-basic-text.cmd'
+># Test ability to retrieve text file
+>serve s1
+Server s1 running at 77342d6f5c87:14216
+>generate random-text.txt 10K
+># Request file from server
+>request r1 random-text.txt s1
+Client: Requesting '/random-text.txt' from localhost:14216
+>wait *
+ERROR: 1 events still pending.  Wait timeout after 2.01 seconds: No proxy activity detected for 2161.6 ms
+  Event[Request r1 requesting TIME=0.181 SERVER = s1  URI = /random-text.txt ]
+Timeout BEFORE server received request
+># Allow server to respond to request
+>respond r1
+ERROR: Invalid request ID 'r1' (Cannot respond as event is classified still as request)
+>wait *
+>check r1
+ERROR: Request r1 generated status 'timeout on request'.  Expecting 'ok' (timeout)
+>quit
+Proxy stdout: Proxy terminated
+Testing done.  Elapsed time = 3.20 seconds
+ERROR COUNT = 3

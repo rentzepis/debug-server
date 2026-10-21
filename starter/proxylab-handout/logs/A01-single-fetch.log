@@ -1,0 +1,42 @@
+>option timing 1
+>option locking 1
+>option semaphore 1
+>proxy ./proxy
+Proxy set up at 77342d6f5c87:10802
+>option stretch 200
+>source '/work/starter/proxylab-handout/tests/A01-single-fetch.cmd'
+># Test ability to fetch very small text file
+>serve s1                       # Set up server
+Server s1 running at 77342d6f5c87:4032
+>generate random-text.txt 50    # Create file
+>fetch f1 random-text.txt s1    # Fetch it from server
+Client: Fetching '/random-text.txt' from localhost:4032
+>wait *
+ERROR: 1 events still pending.  Wait timeout after 2.00 seconds: No proxy activity detected for 2159.0 ms
+  Event[Fetch f1 requesting TIME=0.172 SERVER = s1  URI = /random-text.txt ]
+Timeout BEFORE server received request
+>check f1                       # Make sure it's correct
+ERROR: Request f1 generated status 'timeout on request'.  Expecting 'ok' (timeout)
+>trace f1                       # Run trace on transaction
+== Trace of request f1 =========================================================
+Initial request by client had header:
+GET http://localhost:4032/random-text.txt HTTP/1.0\r\n
+Host: localhost:4032\r\n
+Request-ID: f1\r\n
+Response: Immediate\r\n
+Connection: close\r\n
+Proxy-Connection: close \r\n
+User-Agent: CMU/1.0 Iguana/20180704 PxyDrive/0.0.1\r\n
+\r\n
+--------------------------------------------------------------------------------
+Timeout before the server could receive the request
+--------------------------------------------------------------------------------
+Reponse NOT sent by server
+--------------------------------------------------------------------------------
+Response NOT received by client
+--------------------------------------------------------------------------------
+Request status:  timeout on request (timeout)
+>quit                           # Exit program
+Proxy stdout: Proxy terminated
+Testing done.  Elapsed time = 4.19 seconds
+ERROR COUNT = 2

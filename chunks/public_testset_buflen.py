@@ -1,0 +1,6 @@
+from prompt_engineering.utils import Chunk
+
+chunks = [
+	{'id': 'cozitive__proxy.c', 'chunk': Chunk(match_line=187, start_line=183, end_line=197, lines=['            len += n;', "        } else if (valid) {     // size too big -> don't save in cache list", '            valid = 0;', '        }', '        rio_writen(connfd, buf, n);', '    }', '', '    // if valid, insert data at the first of cache list', '    if (valid) {', '        // if cache is full, delete last item', '        while (cachesize + len > MAX_CACHE_SIZE) {', '            delete_last_cache();', '        }', '', '        cacheitem *ci = malloc(sizeof(cacheitem));'])},
+	{'id': 'LeoCurdi__cpts360.c', 'chunk': Chunk(match_line=139, start_line=135, end_line=149, lines=['    while (1) {', '        // we can read the whole response using readn. returns the number of bytes read', '        result = rio_readn(serverSocketDescriptor, serverResponse, BUFFER_SIZE);', '        if (result <= 0) break;', '        result = rio_writen(clientFileDescriptor, serverResponse, result); // write the n byte line to the client', '        if (result <= 0) break;', '    }', '', '    // close the server file descriptor', '    Close(serverSocketDescriptor);', '}', '', '/*', '    Sets up the proxy server by listening on the entered port and', '    continuously accepting incomming connections.'])},
+]
