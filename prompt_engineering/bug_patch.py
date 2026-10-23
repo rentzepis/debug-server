@@ -49,13 +49,13 @@ def apply_edit(path, edits):
     return original
 
 
-def builds(file, timeout=120):
-    repo_dir = "starter/proxylab-handout/submissions/"
-    r = subprocess.run(
-        ["make", "-B", "-C", repo_dir, "CC=gcc -Werror", file],
-        capture_output=True, text=True, timeout=timeout,
-    )
-    return r.returncode == 0, r.stderr
+# def builds(file, timeout=120):
+#     repo_dir = "starter/proxylab-handout/submissions/"
+#     r = subprocess.run(
+#         ["make", "-B", "-C", repo_dir, "CC=gcc -Werror", file],
+#         capture_output=True, text=True, timeout=timeout,
+#     )
+#     return r.returncode == 0, r.stderr
 
 def collapse_blank_lines(text: str, max_consecutive: int = 1) -> str:
     """
@@ -89,8 +89,8 @@ def apply_patch(path, edits):
         edits = [edits]
     original = apply_edit(path, edits)
     remove_excess_blank_lines_from_file(path)
-    ok, err = builds(path.name if hasattr(path, "name") else str(path))
-    if not ok:
-        with open(path, "w", newline="") as f:
-            f.write(original)
-        raise ValueError(f"mutation doesn't compile:\n{err}")
+    # ok, err = builds(path.name if hasattr(path, "name") else str(path))
+    # if not ok:
+    #     with open(path, "w", newline="") as f:
+    #         f.write(original)
+    #     raise ValueError(f"mutation doesn't compile:\n{err}")

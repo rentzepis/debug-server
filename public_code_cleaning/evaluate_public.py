@@ -188,6 +188,7 @@ def evaluate_all_submissions():
         log_dir = HANDOUT_DIR / "logs"
         if log_dir.exists():
             shutil.rmtree(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)  # add this line
 
         subprocess.run(
             ["make", "-C", str(HANDOUT_DIR), "format"],
