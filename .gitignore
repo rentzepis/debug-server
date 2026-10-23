@@ -25,3 +25,5 @@ proxy_downloads/*
 __pycache__/
 *.py[cod]
 *$py.class
+starter/proxylab-handout/submissions/*
+starter/proxylab-handout/logs/*
